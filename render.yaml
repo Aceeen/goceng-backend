@@ -1,0 +1,51 @@
+# render.yaml
+# Automates the deployment of the GOCENG Backend to Render.com
+
+services:
+  - type: web
+    name: goceng-backend
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    
+    # Enable automatic deployments when code is pushed to the target branch
+    autoDeploy: true
+
+    # Scaling configuration
+    plan: free # Change to 'starter' or higher for production scale
+    
+    # Health checks ensuring zero-downtime rollouts
+    healthCheckPath: /health
+
+    # Injecting placeholders to ensure Render prompts you for variables upon deployment
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: MASTER_SPREADSHEET_ID
+        sync: false
+      - key: WA_VERIFY_TOKEN
+        sync: false
+      - key: WA_ACCESS_TOKEN
+        sync: false
+      - key: WA_PHONE_NUMBER_ID
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: INTERNAL_API_KEY
+        sync: false

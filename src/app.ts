@@ -13,9 +13,12 @@ import transactionRouter from './modules/transaction/transaction.router';
 import budgetRouter from './modules/budget/budget.router';
 import dashboardRouter from './modules/dashboard/dashboard.router';
 import reportRouter from './modules/report/report.router';
+import userRouter from './modules/user/user.router';
+import sheetsRouter from './modules/sheets/sheets.router';
 
 // Middlewares
 import { authenticate } from './middlewares/authenticate';
+import { apiAuth } from './middlewares/apiAuth';
 
 const app = express();
 
@@ -54,12 +57,16 @@ app.use('/v1/auth', authRouter);
 app.use(express.json());
 
 // Protected API Routes
+app.use('/v1/users', authenticate, userRouter);
 app.use('/v1/categories', authenticate, categoryRouter);
 app.use('/v1/accounts', authenticate, accountRouter);
 app.use('/v1/transactions', authenticate, transactionRouter);
 app.use('/v1/budgets', authenticate, budgetRouter);
 app.use('/v1/dashboard', authenticate, dashboardRouter);
 app.use('/v1/reports', authenticate, reportRouter);
+
+// Internal Server-to-Server Routes
+app.use('/v1/internal/sheets', apiAuth, sheetsRouter);
 
 // Health Check
 app.get('/health', (req: Request, res: Response) => {
