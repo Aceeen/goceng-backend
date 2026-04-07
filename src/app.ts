@@ -7,6 +7,15 @@ import { env } from './config/env';
 // Routers
 import webhookRouter from './modules/webhook/webhook.router';
 import authRouter from './modules/auth/auth.router';
+import categoryRouter from './modules/category/category.router';
+import accountRouter from './modules/account/account.router';
+import transactionRouter from './modules/transaction/transaction.router';
+import budgetRouter from './modules/budget/budget.router';
+import dashboardRouter from './modules/dashboard/dashboard.router';
+import reportRouter from './modules/report/report.router';
+
+// Middlewares
+import { authenticate } from './middlewares/authenticate';
 
 const app = express();
 
@@ -43,6 +52,14 @@ app.use('/v1/auth', authRouter);
 
 // Standard JSON body parser for other paths
 app.use(express.json());
+
+// Protected API Routes
+app.use('/v1/categories', authenticate, categoryRouter);
+app.use('/v1/accounts', authenticate, accountRouter);
+app.use('/v1/transactions', authenticate, transactionRouter);
+app.use('/v1/budgets', authenticate, budgetRouter);
+app.use('/v1/dashboard', authenticate, dashboardRouter);
+app.use('/v1/reports', authenticate, reportRouter);
 
 // Health Check
 app.get('/health', (req: Request, res: Response) => {

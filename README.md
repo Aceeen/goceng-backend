@@ -59,3 +59,23 @@ If you need to test the WhatsApp Webhooks live from Meta on your local machine:
 - `npm run dev` - Starts the Nodemon development server
 - `npm run build` - Compiles TypeScript down to standard JS
 - `npm run generate` - Regenerates your Prisma Types locally (Run this whenever someone else pushes a schema change!)
+
+## Modules
+1. Categories & Accounts Modules
+Added GET /v1/categories returning all generic categories natively sorted for rendering dropdown menus cleanly.
+Added full mapping for Accounts (CRUD operations). Accounts update automatically when transactions are saved to keep the user's balances dynamically synchronized!
+2. Transactions Module (/v1/transactions)
+GET logic: Fully features pagination limits, dates, and category filtering dynamically built onto Prisma where clauses.
+Transactional integrity: The POST and DELETE requests run under $transaction locks so that an account's currentBalance perfectly reflects any added or removed ledger entries.
+3. Budgets Module (/v1/budgets)
+Uses Prisma's parallel aggregation queries to calculate the limitAmount alongside the literal realized spending extracted mathematically straight from the matching month's transactions.
+Calculates your percentages and throws out automated statuses (ON_TRACK, WARNING, OVER_BUDGET).
+4. Dashboards Aggregation (/v1/dashboard/summary)
+The mecca of the frontend application. It crunches massive arrays to return precisely what the technical PDF asked for in a single request:
+
+totalBalance computed from all Active bank accounts.
+monthlyIncome and monthlyExpense.
+Returns an aggregated array spendingByCategory with pre-computed percentages for your Pie Charts.
+Groups expenses efficiently into cashFlowByWeek arrays.
+5. PDF Reporting APIs (/v1/reports/data)
+Produces a uniquely crafted payload that groups all expenses, logs, metadata, and status snapshots into an isolated JSON payload specific to a given ?month=X&year=Y query. This is optimized for pushing into jsPDF renderers.
