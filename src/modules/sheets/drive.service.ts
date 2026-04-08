@@ -28,6 +28,10 @@ export class DriveService {
    */
   static async uploadReceipt(userId: string, imageBuffer: Buffer, mimeType: string, fileName: string): Promise<string | null> {
     await this.authenticateUser(userId);
+    
+    // Grab the folder ID we constructed during onboarding
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const targetFolderId = user?.googleDriveFolderId;
 
     // Convert strict Buffer into a Readable stream for Google Drive Media requirements
     const stream = new Readable();
@@ -38,7 +42,8 @@ export class DriveService {
       const fileMeta = await driveAPI.files.create({
         requestBody: {
           name: fileName,
-          mimeType
+          mimeType,
+          parents: targetFolderId ? [targetFolderId] : undefined
         },
         media: {
           mimeType,

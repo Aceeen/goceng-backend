@@ -7,11 +7,15 @@ import { env } from '../../config/env';
  * Initiates the Google OAuth login flow.
  */
 export const googleLogin = (req: Request, res: Response) => {
-  // Generate a random state string to mitigate CSRF attacks
-  const state = crypto.randomBytes(32).toString('hex');
-  
-  // Optional: In a full production app, you might save `state` in a cookie here
-  // to verify it during the callback.
+  const waNumber = req.query.wa as string;
+
+  // We wrap any custom params (like wa mapping) into the standard CSRF 'state' packet
+  // so Google bounces it back to us untouched.
+  const stateObj = {
+    csrf: crypto.randomBytes(16).toString('hex'),
+    wa: waNumber || null
+  };
+  const state = Buffer.from(JSON.stringify(stateObj)).toString('base64');
   
   const url = AuthService.getGoogleAuthUrl(state);
   res.redirect(url);
@@ -23,6 +27,7 @@ export const googleLogin = (req: Request, res: Response) => {
 export const googleCallback = async (req: Request, res: Response) => {
   const code = req.query.code as string;
   const error = req.query.error as string;
+  const state = req.query.state as string;
 
   if (error) {
     console.error('Google OAuth Error:', error);
@@ -34,7 +39,7 @@ export const googleCallback = async (req: Request, res: Response) => {
   }
 
   try {
-    const jwtToken = await AuthService.processGoogleCallback(code);
+    const jwtToken = await AuthService.processGoogleCallback(code, state);
     
     // Redirect back to frontend dashboard with the JWT token in the URL params
     res.redirect(`${env.FRONTEND_URL}/dashboard?token=${jwtToken}`);
