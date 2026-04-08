@@ -31,6 +31,9 @@ app.use(cors({
   credentials: true,
 }));
 
+// Trust proxy so rate limiting doesn't throw errors behind Ngrok or Render
+app.set('trust proxy', 1);
+
 // Rate limiting (100 req per 15 min per IP)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,

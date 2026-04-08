@@ -74,4 +74,40 @@ export class WhatsAppService {
       return false;
     }
   }
+
+  /**
+   * Fetches an image buffer directly from Meta's servers using a media ID.
+   */
+  static async downloadMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    try {
+      // Step 1: Get media URL from Meta
+      const urlResponse = await fetch(`https://graph.facebook.com/v17.0/${mediaId}`, {
+        headers: { 'Authorization': `Bearer ${env.WA_ACCESS_TOKEN}` }
+      });
+      
+      const mediaData: any = await urlResponse.json();
+      if (!urlResponse.ok || !mediaData.url) {
+        console.error('Failed to resolve Media URL:', mediaData);
+        return null;
+      }
+
+      // Step 2: Download actual binary buffer from resolved URL
+      const bufferResponse = await fetch(mediaData.url, {
+        headers: { 'Authorization': `Bearer ${env.WA_ACCESS_TOKEN}` }
+      });
+
+      if (!bufferResponse.ok) return null;
+
+      const arrayBuffer = await bufferResponse.arrayBuffer();
+      const mimeType = bufferResponse.headers.get('content-type') || 'image/jpeg';
+
+      return {
+        buffer: Buffer.from(arrayBuffer),
+        mimeType
+      };
+    } catch (error) {
+      console.error('Error fetching WA media:', error);
+      return null;
+    }
+  }
 }
