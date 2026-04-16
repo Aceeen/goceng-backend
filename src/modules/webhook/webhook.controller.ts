@@ -57,7 +57,7 @@ const processAsyncPayload = async (payload: any) => {
 
     console.log(`[Webhook] Menerima pesan dari ${fromNumber}: ${incomingText}`);
 
-    // --- BATAS TUGAS INFRASTRUKTUR / PIPA --- 
+    // --- BATAS TUGAS INFRASTRUKTUR --- 
 
     /* 
       // TODO (AI Team):

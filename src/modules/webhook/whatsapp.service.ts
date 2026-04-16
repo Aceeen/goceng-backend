@@ -110,4 +110,61 @@ export class WhatsAppService {
       return null;
     }
   }
+
+  /**
+   * Uploads a raw binary Buffer to Meta's servers and sends it directly to a user's WhatsApp.
+   */
+  static async sendDocument(to: string, pdfBuffer: Buffer, fileName: string = 'Report.pdf') {
+    if (!env.WA_PHONE_NUMBER_ID || !env.WA_ACCESS_TOKEN) return false;
+
+    try {
+      // 1. Upload Buffer to Meta Media Server
+      const form = new FormData();
+      const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
+      form.append('file', blob, fileName);
+      form.append('type', 'application/pdf');
+      form.append('messaging_product', 'whatsapp');
+
+      const uploadUrl = `https://graph.facebook.com/v17.0/${env.WA_PHONE_NUMBER_ID}/media`;
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${env.WA_ACCESS_TOKEN}` },
+        body: form
+      });
+      
+      const uploadData: any = await uploadRes.json();
+      if (!uploadData.id) {
+        console.error('Failed to upload document to Meta:', uploadData);
+        return false;
+      }
+
+      // 2. Dispatch the payload Media ID
+      const msgUrl = `https://graph.facebook.com/v17.0/${env.WA_PHONE_NUMBER_ID}/messages`;
+      const payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to,
+        type: 'document',
+        document: {
+          id: uploadData.id,
+          filename: fileName
+        }
+      };
+
+      const sendRes = await fetch(msgUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${env.WA_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await sendRes.json();
+      console.log('✅ Document dispatched to WhatsApp successfully!');
+      return data;
+    } catch (error) {
+      console.error('❌ Error sending WhatsApp document:', error);
+      return false;
+    }
+  }
 }
