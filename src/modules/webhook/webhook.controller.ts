@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { env } from '../../config/env';
 import { WhatsAppService } from './whatsapp.service';
+import { prisma } from '../../config/prisma';
 
 /**
  * Validates the Webhook challenge sent by Meta during setup.
@@ -56,6 +57,19 @@ const processAsyncPayload = async (payload: any) => {
     }
 
     console.log(`[Webhook] Menerima pesan dari ${fromNumber}: ${incomingText}`);
+
+    // --- ONBOARDING INTERCEPTOR ---
+    const user = await prisma.user.findFirst({ where: { whatsappNumber: fromNumber } });
+
+    if (!user) {
+      console.log(`[Onboarding] Intercepting unregistered number: ${fromNumber}`);
+      const loginLink = `${env.FRONTEND_URL}/login?wa=${fromNumber}`;
+      
+      const welcomeMessage = `Halo! Selamat datang di *GOCENG* 🤖📊\n\nNomor Anda belum terdaftar di sistem kami. Untuk mulai mencatat keuangan otomatis, silakan hubungkan akun Google Anda di bawah ini:\n\n🔗 ${loginLink}\n\nSetelah login berhasil, silakan sapa saya kembali!`;
+      
+      await WhatsAppService.sendTextMessage(fromNumber, welcomeMessage);
+      return; // Hard stop so AI doesn't process this
+    }
 
     // --- BATAS TUGAS INFRASTRUKTUR --- 
 
