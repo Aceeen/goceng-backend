@@ -26,6 +26,8 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT Secret must be at least 32 characters'),
   TOKEN_ENCRYPTION_KEY: z.string().length(64, 'Token Encryption Key must be a 64-char hex string (32 bytes)'),
   INTERNAL_API_KEY: z.string().min(1, 'Internal API Key is required'),
+  GEMINI_API_KEY: z.string().min(1, 'Gemini API Key is required'),
+  
 });
 
 const _env = envSchema.safeParse(process.env);
