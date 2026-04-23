@@ -148,7 +148,7 @@ Aturan type:
 - Default EXPENSE
 - INCOME hanya jika ada kata: gaji, terima, dapat, masuk, transfer masuk, bayaran, untung
 
-Jika nominal tidak ada → {"error": "NO_AMOUNT", "message": "Nominal tidak ditemukan"}
+Jika nominal tidak ada → {"error": "NO_AMOUNT", "message": "Nominal tidak ditemukan"
 `.trim();
 
 
