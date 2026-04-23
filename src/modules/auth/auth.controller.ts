@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import crypto from 'crypto';
 import { AuthService } from './auth.service';
 import { env } from '../../config/env';
+import { UserService } from '../user/user.service';
 
 /**
  * Initiates the Google OAuth login flow.
@@ -46,6 +47,15 @@ export const googleCallback = async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Failed to process Google Callback:', err);
     res.redirect(`${env.FRONTEND_URL}/login?error=server_error`);
+  }
+};
+
+export const getCurrentUser = async (req: Request, res: Response) => {
+  try {
+    const user = await UserService.getUserProfile(req.user!.sub);
+    res.json(user);
+  } catch (error) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User profile not found' } });
   }
 };
 

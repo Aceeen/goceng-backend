@@ -6,6 +6,13 @@ import { env } from '../../config/env';
 import { encryptToken } from '../../utils/encryption';
 
 export class AuthService {
+  private static hasConfiguredMasterSpreadsheet(): boolean {
+    return Boolean(
+      env.MASTER_SPREADSHEET_ID &&
+      !env.MASTER_SPREADSHEET_ID.toLowerCase().includes('placeholder')
+    );
+  }
+
   /**
    * Generates the Google OAuth consent screen URL.
    */
@@ -102,49 +109,55 @@ export class AuthService {
     let googleDriveFolderId = user.googleDriveFolderId || null;
 
     if (!spreadsheetId || !googleDriveFolderId) {
-      console.log(`[Drive Setup] Constructing folder tree for new user ${user.id}...`);
-      const driveAPI = google.drive({ version: 'v3', auth: oauth2Client });
-      
-      try {
-        // 5a. Create GOCENG Master Folder
-        const rootFolderRes = await driveAPI.files.create({
-          requestBody: { name: 'GOCENG', mimeType: 'application/vnd.google-apps.folder' },
-          fields: 'id'
-        });
-        const rootFolderId = rootFolderRes.data.id!;
-
-        // 5b. Create Bukti Transaksi Sub-folder
-        const subFolderRes = await driveAPI.files.create({
-          requestBody: { 
-            name: 'bukti_transaksi', 
-            mimeType: 'application/vnd.google-apps.folder',
-            parents: [rootFolderId]
-          },
-          fields: 'id'
-        });
-        googleDriveFolderId = subFolderRes.data.id!;
-
-        // 5c. Copy Spreadsheet Template
-        const copyRes = await driveAPI.files.copy({
-          fileId: env.MASTER_SPREADSHEET_ID,
-          requestBody: {
-            name: `GOCENG Record - ${user.name}`,
-            parents: [rootFolderId]
-          },
-          fields: 'id'
-        });
-        spreadsheetId = copyRes.data.id!;
+      if (!this.hasConfiguredMasterSpreadsheet()) {
+        console.warn(
+          '[Drive Setup] Skipped because MASTER_SPREADSHEET_ID is still a placeholder or is not configured.'
+        );
+      } else {
+        console.log(`[Drive Setup] Constructing folder tree for new user ${user.id}...`);
+        const driveAPI = google.drive({ version: 'v3', auth: oauth2Client });
         
-        // 5d. Save setup globally
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { spreadsheetId, googleDriveFolderId },
-        });
+        try {
+          // 5a. Create GOCENG Master Folder
+          const rootFolderRes = await driveAPI.files.create({
+            requestBody: { name: 'GOCENG', mimeType: 'application/vnd.google-apps.folder' },
+            fields: 'id'
+          });
+          const rootFolderId = rootFolderRes.data.id!;
 
-        console.log(`[Drive Setup] Complete. Sheet: ${spreadsheetId}, Folder: ${googleDriveFolderId}`);
-      } catch (error) {
-        console.error(`[Drive Setup] Failed to create folder structure:`, error);
-        // Will fallback to null if the user's template fails to clone
+          // 5b. Create Bukti Transaksi Sub-folder
+          const subFolderRes = await driveAPI.files.create({
+            requestBody: { 
+              name: 'bukti_transaksi', 
+              mimeType: 'application/vnd.google-apps.folder',
+              parents: [rootFolderId]
+            },
+            fields: 'id'
+          });
+          googleDriveFolderId = subFolderRes.data.id!;
+
+          // 5c. Copy Spreadsheet Template
+          const copyRes = await driveAPI.files.copy({
+            fileId: env.MASTER_SPREADSHEET_ID,
+            requestBody: {
+              name: `GOCENG Record - ${user.name}`,
+              parents: [rootFolderId]
+            },
+            fields: 'id'
+          });
+          spreadsheetId = copyRes.data.id!;
+          
+          // 5d. Save setup globally
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { spreadsheetId, googleDriveFolderId },
+          });
+
+          console.log(`[Drive Setup] Complete. Sheet: ${spreadsheetId}, Folder: ${googleDriveFolderId}`);
+        } catch (error) {
+          console.error(`[Drive Setup] Failed to create folder structure:`, error);
+          // Will fallback to null if the user's template fails to clone
+        }
       }
     }
 
