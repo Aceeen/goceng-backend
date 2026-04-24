@@ -69,10 +69,31 @@ export interface EditResult {
   suggestedCategory?: string;
 }
 
-// ─── Error response dari Gemini ───────────────────────────────────────────────
+// ─── Error response dari AI ───────────────────────────────────────────────────
+
+// export interface AIErrorResult {
+//   error: 'NO_AMOUNT' | 'PARSE_ERROR' | 'GEMINI_MAX_RETRY_EXCEEDED';
+//   message: string;
+// }
+
+// export interface AIErrorResult {
+//   error:
+//     | 'NO_AMOUNT'
+//     | 'PARSE_ERROR'
+//     | 'GEMINI_MAX_RETRY_EXCEEDED'
+//     | 'AI_NOT_CONFIGURED'
+//     | 'AI_ALL_PROVIDERS_FAILED'
+//     | 'AI_UPSTREAM_NON_RETRYABLE';
+//   message: string;
+// }
 
 export interface AIErrorResult {
-  error: 'NO_AMOUNT' | 'PARSE_ERROR' | 'GEMINI_MAX_RETRY_EXCEEDED';
+  error:
+    | 'NO_AMOUNT'
+    | 'PARSE_ERROR'
+    | 'AI_NOT_CONFIGURED'
+    | 'AI_MAX_RETRY_EXCEEDED'
+    | 'AI_REQUEST_FAILED';
   message: string;
 }
 

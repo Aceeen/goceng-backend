@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { extractFromImage } from '../src/modules/ai/ai.service';
+// import { extractFromImage, getAIProviderNames } from '../src/modules/ai/ai.service';
+import { extractFromImage, getOCRProviders } from '../src/modules/ai/ai.service';
 import { isAIError } from '../src/modules/ai/ai.types';
 
 async function main() {
