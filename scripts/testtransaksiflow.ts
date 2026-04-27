@@ -19,7 +19,7 @@ import { google } from 'googleapis';
 import { prisma as prismaClient } from '../src/config/prisma';
 
 // ── Config: ganti dengan user ID yang ada di DB lokal kamu ───────────────────
-const TEST_USER_ID = process.env.TEST_USER_ID || 'GANTI_DENGAN_USER_ID_KAMU';
+const TEST_USER_ID = process.env.TEST_USER_ID || 'riskiyatugas@gmail.com';
 
 const categories = [
   'Makan & Minum', 'BBM', 'Transport Online', 'Obat & Suplemen',

@@ -27,7 +27,7 @@ const corrections = [
 ];
 
 // jalankan satu correction dulu agar hemat request
-const RUN_ONLY_FIRST_CORRECTION = true;
+const RUN_ONLY_FIRST_CORRECTION = false;
 
 // const activeCorrections = corrections;
 const activeCorrections = RUN_ONLY_FIRST_CORRECTION ? [corrections[0]] : corrections;

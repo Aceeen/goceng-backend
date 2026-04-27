@@ -26,6 +26,9 @@ const categories = [
 
 const samples = [
   // ── Normal cases ──────────────────────────────────────────────────────────
+  { input: 'transfer masuk dari klien 1.5jt',  expect: { category: 'Freelance',        type: 'INCOME'  } },
+  { input: 'beli sepatu 50k',                     expect: { error: 'NO_AMOUNT' } },
+  { input: 'tadi habis makan',                 expect: { error: 'NO_AMOUNT' } },
   { input: 'makan siang di warteg 15rb',       expect: { category: 'Makan & Minum',    type: 'EXPENSE' } },
   { input: 'gajian bulan ini 2.500.000',       expect: { category: 'Gaji',             type: 'INCOME'  } },
   { input: 'bayar grab 22 ribu',               expect: { category: 'Transport Online', type: 'EXPENSE' } },
@@ -34,8 +37,6 @@ const samples = [
   { input: 'transfer masuk dari klien 1.5jt',  expect: { category: 'Freelance',        type: 'INCOME'  } },
   { input: 'parkir mall 5000',                 expect: { category: 'Mobilitas Tambahan', type: 'EXPENSE' } },
   // ── Edge cases ────────────────────────────────────────────────────────────
-  { input: 'tadi habis makan',                 expect: { error: 'NO_AMOUNT' } },
-  { input: 'beli sesuatu',                     expect: { error: 'NO_AMOUNT' } },
 ];
 
 const DELAY_BETWEEN_REQUEST_MS = 5000;
@@ -66,7 +67,7 @@ async function main() {
     if (isAIError(result)) {
       const expectError = (sample.expect as any).error;
       if (expectError && result.error === expectError) {
-        console.log(`✅ PASS — Error seperti yang diharapkan: ${result.error}`);
+        console.log(`✅ PASS — Error : ${result.error}`);
         passed++;
       } else {
         console.log(`❌ FAIL — AI Error tidak terduga: ${result.error}`);

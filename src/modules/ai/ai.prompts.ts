@@ -145,10 +145,18 @@ Aturan konversi nominal:
 - "dua ratus ribu" → 200000
 
 Aturan type:
-- Default EXPENSE
-- INCOME hanya jika ada kata: gaji, terima, dapat, masuk, transfer masuk, bayaran, untung
+- Default: EXPENSE
+- Gunakan INCOME jika ada kata: gaji, terima, dapat, masuk, transfer masuk, bayaran, untung, hasil, klien, client, invoice, fee, jasa, freelance, project, honor
+freelance/project/honor/klien/client/fee/invoice/jasa/bayaran dari/transfer dari klien/masuk dari klien → Freelance (type: INCOME)
+CONTOH: "transfer masuk dari klien" → Freelance INCOME
+CONTOH: "dapat fee dari project" → Freelance INCOME
+CONTOH: "honor mengajar" → Freelance INCOME
+JIKA tidak ada angka/nominal eksplisit dalam pesan → kembalikan TEPAT INI:
+{"error":"NO_AMOUNT","message":"Nominal tidak ditemukan dalam pesan"}
+ 
+JIKA ada angka → kembalikan TEPAT INI (isi field sesuai data):
+{"type":"EXPENSE","amount":0,"description":"","transactionDate":"YYYY-MM-DD","suggestedCategory":"","confidence":0.0}
 
-Jika nominal tidak ada → {"error": "NO_AMOUNT", "message": "Nominal tidak ditemukan"
 `.trim();
 
 

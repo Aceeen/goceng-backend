@@ -238,7 +238,7 @@ async function callOCRSpaceOnce(
 
   const body = new URLSearchParams();
   body.set('base64Image', `data:${mimeType};base64,${base64Image}`);
-  body.set('language', process.env.OCR_SPACE_LANGUAGE?.trim() || 'eng');
+  body.set('language', process.env.OCR_SPACE_LANGUAGE?.trim() || 'auto');
   body.set('isTable', 'true');
   body.set('scale', 'true');
   body.set('OCREngine', process.env.OCR_SPACE_ENGINE?.trim() || '2');

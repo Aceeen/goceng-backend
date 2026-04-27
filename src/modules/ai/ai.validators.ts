@@ -213,12 +213,22 @@ export function validateNLPResponse(input: NLPResponse): NLPResponse {
   const allowedTypes = new Set(['INCOME', 'EXPENSE']);
 
   const type = normalizeString(input.type);
-  const amount = normalizePositiveNumber(input.amount);
+  const rawAmount = (input as any).amount;
   const description = normalizeString(input.description);
   const transactionDate = normalizeDate(input.transactionDate);
   const suggestedCategory =
     normalizeString(input.suggestedCategory) || 'Pengeluaran Lainnya';
   const confidence = normalizeConfidence(input.confidence);
+
+  // Kalau model return amount 0 → anggap NO_AMOUNT
+  if (rawAmount === 0 || rawAmount === null || rawAmount === undefined) {
+    return {
+      error: 'NO_AMOUNT',
+      message: 'Nominal tidak ditemukan dalam pesan',
+    };
+  }
+
+  const amount = normalizePositiveNumber(rawAmount);
 
   if (
     !type ||
