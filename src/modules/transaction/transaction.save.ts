@@ -38,27 +38,60 @@ export async function saveConfirmedTransaction(userId: string, data: ExtractedDa
     throw new Error('OCR_RESULT_BLUR_CANNOT_SAVE');
   }
 
-  const accountId =
-    data.accountId ??
-    (
-      await prisma.account.findFirst({
-        where: { userId, isActive: true },
-        orderBy: { createdAt: 'asc' },
-      })
-    )?.id;
+const account = data.accountId
+  ? await prisma.account.findFirst({
+      where: {
+        id: data.accountId,
+        userId,
+        isActive: true,
+      },
+    })
+  : await prisma.account.findFirst({
+      where: {
+        userId,
+        isActive: true,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
 
-  if (!accountId) {
-    throw new Error('USER_HAS_NO_ACCOUNT');
+if (!account) {
+  throw new Error('USER_HAS_NO_ACCOUNT');
+}
+
+const accountId = account.id;
+const normalizedCategory =
+  (data as any).suggestedCategory ??
+  (data as any).category ??
+  (data as any).kategori ??
+  (data as any).categoryName;
+
+let category = null;
+let transactionType: 'INCOME' | 'EXPENSE' = data.type ?? 'EXPENSE';
+if (data.suggestedCategory) {
+  category = await prisma.category.findFirst({
+    where: {
+      name: {
+        equals: data.suggestedCategory,
+        mode: 'insensitive'
+      }
+    },
+  });
+
+  // 🔥 kalau belum ada → bikin baru
+  if (!category) {
+    category = await prisma.category.create({
+      data: {
+        name: data.suggestedCategory,
+        type: transactionType
+      },
+    });
   }
-
-  const category = data.suggestedCategory
-    ? await prisma.category.findFirst({
-        where: { name: data.suggestedCategory },
-      })
-    : null;
+}
 
   let amount = 0;
-  let transactionType: 'INCOME' | 'EXPENSE' = data.type ?? 'EXPENSE';
+  
   let description: string | null = null;
   let merchantName: string | null = null;
   let transactionDate: Date = new Date();

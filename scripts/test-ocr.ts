@@ -10,7 +10,7 @@ import { extractFromImage, getOCRProviders } from '../src/modules/ai/ai.service'
 import { isAIError } from '../src/modules/ai/ai.types';
 
 async function main() {
-  const imagePath = path.resolve('scripts/sample-receipt.jpeg');
+  const imagePath = path.resolve('scripts/notatf.jpeg');
 
   console.log('🧪 TEST: OCR Receipt Extraction');
   console.log('='.repeat(60));

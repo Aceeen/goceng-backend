@@ -4,6 +4,8 @@ import { Request, Response } from 'express';
 import { env } from '../../config/env';
 import { WhatsAppService } from './whatsapp.service';
 import { prisma } from '../../config/prisma';
+import fs from 'fs';
+import path from 'path';
 
 // ─── AI Module ────────────────────────────────────────────────────────────────
 import { extractFromImage, extractFromText, applyUserCorrection } from '../ai/ai.service';
@@ -143,14 +145,15 @@ const handleImageMessage = async (
 ) => {
   await WhatsAppService.sendTextMessage(fromNumber, '🔍 Sedang membaca struk kamu...');
 
-  const media = await WhatsAppService.downloadMedia(mediaId);
-  if (!media) {
-    await WhatsAppService.sendTextMessage(fromNumber, '😔 Gagal mengunduh gambar. Coba kirim ulang ya.');
-    return;
-  }
 
-  const base64 = media.buffer.toString('base64');
-  const result = await extractFromImage(base64, media.mimeType);
+// 🔥 Ambil gambar dari folder lokal
+const imagePath = path.resolve(process.cwd(), 'scripts/notakorea.jpeg');
+
+const buffer = fs.readFileSync(imagePath);
+const base64 = buffer.toString('base64');
+
+// langsung kirim ke AI
+const result = await extractFromImage(base64, 'image/jpeg');
 
   // ── Error dari Gemini ─────────────────────────────────────────────────────
   if (isAIError(result)) {
@@ -266,7 +269,26 @@ const handleEditCorrection = async (
   fromNumber: string, editingSession: any, correctionText: string
 ) => {
   await WhatsAppService.sendTextMessage(fromNumber, '✏️ Menerapkan koreksimu...');
+const match = correctionText.toLowerCase().match(/(\d+(?:[.,]\d+)?)\s*(rb|ribu|k|jt|juta)?/);
 
+if (match) {
+  const raw = Number(match[1].replace(',', '.'));
+  const unit = match[2];
+
+  let amount = raw;
+  if (unit === 'rb' || unit === 'ribu' || unit === 'k') amount = raw * 1000;
+  if (unit === 'jt' || unit === 'juta') amount = raw * 1000000;
+
+  const merged = {
+    ...(editingSession.extractedData as any),
+    amount,
+    totalAmount: amount
+  };
+
+  await resetSessionToPending(editingSession.id, merged);
+  await sendConfirmationMessage(fromNumber, merged, editingSession.id);
+  return;
+}
   const corrected = await applyUserCorrection(correctionText, editingSession.extractedData as object);
 
   if (isAIError(corrected)) {
@@ -284,6 +306,7 @@ const handleEditCorrection = async (
   } else {
     await sendConfirmationMessage(fromNumber, data, editingSession.id);
   }
+
 };
 
 // =============================================================================
@@ -301,7 +324,17 @@ const sendConfirmationMessage = async (
   const date       = data.transactionDate
     ? new Date(data.transactionDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })
     : 'Hari ini';
+const itemText =
+  Array.isArray(data.items) && data.items.length > 0
+    ? data.items
+        .map((item: any, index: number) => {
+          const qty = Number(item.quantity ?? 1);
+          const total = Number(item.totalPrice ?? item.unitPrice ?? 0).toLocaleString('id-ID');
 
+          return `${index + 1}. ${item.name} x${qty} - Rp ${total}`;
+        })
+        .join('\n')
+    : '-';
   await WhatsAppService.sendInteractiveButtons(
     fromNumber,
     `🧾 *GOCENG mendeteksi transaksi:*\n\n` +
@@ -310,6 +343,7 @@ const sendConfirmationMessage = async (
     `• 📁 Kategori: *${category}*\n` +
     `• 📅 Tanggal: *${date}*\n` +
     `• 🤖 Keyakinan AI: *${confidence}%*\n\n` +
+    `🛒 *Detail Item:*\n${itemText}\n\n` +
     `Apakah data ini sudah benar?`,
     [
       { id: BTN_CONFIRM, title: '✅ Ya, Simpan' },
@@ -336,7 +370,17 @@ const sendForeignConfirmationMessage = async (
   const date           = data.transactionDate
     ? new Date(data.transactionDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })
     : 'Hari ini';
+const itemText =
+  Array.isArray(data.items) && data.items.length > 0
+    ? data.items
+        .map((item: any, index: number) => {
+          const qty = Number(item.quantity ?? 1);
+          const total = Number(item.totalPrice ?? item.unitPrice ?? 0).toLocaleString('id-ID');
 
+          return `${index + 1}. ${item.name} x${qty} - Rp ${total}`;
+        })
+        .join('\n')
+    : '-';
   await WhatsAppService.sendInteractiveButtons(
     fromNumber,
     `🌏 *GOCENG mendeteksi struk LUAR NEGERI:*\n\n` +
@@ -348,6 +392,7 @@ const sendForeignConfirmationMessage = async (
     `• 📅 Tanggal: *${date}*\n` +
     `• 🤖 Keyakinan AI: *${confidence}%*\n\n` +
     `⚠️ _Kurs adalah perkiraan. Koreksi jika perlu._\n\n` +
+    `🛒 *Detail Item:*\n${itemText}\n\n` +
     `Apakah data ini sudah benar?`,
     [
       { id: BTN_CONFIRM, title: '✅ Ya, Simpan' },

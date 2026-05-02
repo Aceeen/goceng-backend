@@ -44,7 +44,11 @@ Format response:
 CASE 3 — FOREIGN: Struk luar negeri (bukan IDR)
 ═══════════════════════════════════════════
 Gunakan jika struk menggunakan mata uang asing: USD ($), SGD, MYR, EUR, JPY, GBP, AUD, THB, dll.
-
+- Jika struk menggunakan bahasa selain Indonesia atau mata uang bukan IDR/Rp, kembalikan case: "FOREIGN".
+- Untuk struk Korea, gunakan originalCurrency: "KRW".
+- Jangan anggap angka KRW sebagai Rupiah.
+- totalAmount harus hasil konversi ke IDR.
+- originalAmount adalah nominal asli pada struk.
 Format response:
 {
   "case": "FOREIGN",
@@ -70,7 +74,7 @@ Panduan kurs perkiraan (gunakan jika tidak tahu kurs terkini):
 - 1 GBP ≈ 20000 IDR
 - 1 AUD ≈ 10500 IDR
 - 1 THB ≈ 450 IDR
-
+- 1 KWR ≈ 11500 IDR
 ═══════════════════════════════════════════
 PANDUAN KATEGORI
 ═══════════════════════════════════════════
@@ -140,6 +144,7 @@ Panduan memilih kategori:
 - "freelance", "project", "honor" → "Freelance" dengan type: INCOME
 
 Aturan konversi nominal:
+- "60rb" atau "60k" = 60000
 - "50rb" atau "50k" → 50000
 - "1,5jt" atau "1.5jt" → 1500000
 - "dua ratus ribu" → 200000
