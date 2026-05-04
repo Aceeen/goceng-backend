@@ -175,8 +175,13 @@ ${JSON.stringify(currentData, null, 2)}
 
 Koreksi dari user: "${correction}"
 
-Terapkan koreksi dan kembalikan HANYA objek JSON yang sudah diperbarui.
-Jangan ubah field yang tidak disebutkan. Tanpa penjelasan, tanpa markdown, tanpa backtick.
+- Terapkan koreksi dan kembalikan HANYA objek JSON yang sudah diperbarui.
+- Jangan ubah field yang tidak disebutkan. Tanpa penjelasan, tanpa markdown, tanpa backtick.
+- Ubah HANYA field yang disebutkan secara eksplisit oleh user.
+- Jika user hanya menyebut kategori, ubah hanya suggestedCategory/categoryId.
+- Jangan mengubah merchantName kecuali user menyebut nama toko/merchant secara eksplisit.
+- Jangan mengubah amount, description, transactionDate, items, atau account kecuali disebutkan.
+- Kembalikan HANYA JSON valid.
 
 Panduan interpretasi:
 - "harganya X" / "totalnya X" → ubah totalAmount atau amount
