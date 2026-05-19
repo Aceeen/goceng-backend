@@ -26,6 +26,7 @@ model User {
   transactions        Transaction[]  
   budgets             Budget[]  
   transactionSessions TransactionSession[]  
+  routineExpenses     RoutineExpense[]
   @@map("users")  
 } 
   
@@ -57,6 +58,7 @@ model Account {
   updatedAt      DateTime    @updatedAt @map("updated_at")  
   user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)  
   transactions   Transaction[]  
+  routineExpenses RoutineExpense[]
   @@map("accounts")  
 } 
 
@@ -79,6 +81,7 @@ model Category {
   createdAt    DateTime     @default(now()) @map("created_at")  
   transactions Transaction[]  
   budgets      Budget[]  
+  routineExpenses RoutineExpense[]
   @@map("categories")  
 } 
 
@@ -157,6 +160,36 @@ model Budget {
   
   @@unique([userId, categoryId, month, year])  
   @@map("budgets")  
+} 
+  
+model RoutineExpense {
+  id              String           @id @default(cuid())
+  userId          String           @map("user_id")
+  accountId       String           @map("account_id")
+  categoryId      String?          @map("category_id")
+  title           String
+  amount          Decimal          @db.Decimal(15,2)
+  frequency       ExpenseFrequency
+  startDate       DateTime         @map("start_date")
+  endDate         DateTime?        @map("end_date")
+  lastProcessedAt DateTime?        @map("last_processed_at")
+  isActive        Boolean          @default(true) @map("is_active")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account         Account          @relation(fields: [accountId], references: [id])
+  category        Category?        @relation(fields: [categoryId], references: [id])
+
+  @@index([userId, isActive])
+  @@map("routine_expenses")
+}
+
+enum ExpenseFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  ANNUALLY
 } 
   
 model TransactionSession {  

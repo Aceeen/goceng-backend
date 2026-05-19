@@ -1,0 +1,101 @@
+import cron from 'node-cron';
+import { prisma } from '../../config/prisma';
+import { ExpenseFrequency, TransactionType, TransactionSource } from '@prisma/client';
+
+export const initRoutineCron = () => {
+  // Run every day at midnight server time
+  cron.schedule('0 0 * * *', async () => {
+    console.log('[Cron] Starting routine expenses processing...');
+    try {
+      await processRoutineExpenses();
+      console.log('[Cron] Routine expenses processing completed.');
+    } catch (error) {
+      console.error('[Cron] Error processing routine expenses:', error);
+    }
+  });
+};
+
+export const processRoutineExpenses = async () => {
+  const now = new Date();
+  
+  // Get all active routines
+  const routines = await prisma.routineExpense.findMany({
+    where: { isActive: true }
+  });
+
+  for (const routine of routines) {
+    try {
+      // 1. Check if routine is within date range
+      if (routine.startDate > now) continue;
+      if (routine.endDate && routine.endDate < now) {
+        // Automatically deactivate expired routines
+        await prisma.routineExpense.update({
+          where: { id: routine.id },
+          data: { isActive: false }
+        });
+        continue;
+      }
+
+      // 2. Determine if it should run today based on frequency
+      let shouldRun = false;
+      const start = routine.startDate;
+
+      if (routine.frequency === ExpenseFrequency.DAILY) {
+        shouldRun = true;
+      } else if (routine.frequency === ExpenseFrequency.WEEKLY) {
+        shouldRun = start.getDay() === now.getDay();
+      } else if (routine.frequency === ExpenseFrequency.MONTHLY) {
+        shouldRun = start.getDate() === now.getDate();
+        // Handle end of month edge cases (e.g. started on 31st, but today is 30th of April)
+        if (!shouldRun && start.getDate() > 28) {
+          const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+          if (now.getDate() === lastDayOfMonth && start.getDate() >= lastDayOfMonth) {
+            shouldRun = true;
+          }
+        }
+      } else if (routine.frequency === ExpenseFrequency.ANNUALLY) {
+        shouldRun = start.getDate() === now.getDate() && start.getMonth() === now.getMonth();
+      }
+
+      if (!shouldRun) continue;
+
+      // 3. Ensure we haven't already processed it today (idempotency)
+      if (routine.lastProcessedAt) {
+        const last = routine.lastProcessedAt;
+        if (last.getDate() === now.getDate() && last.getMonth() === now.getMonth() && last.getFullYear() === now.getFullYear()) {
+          continue; // Already processed today
+        }
+      }
+
+      // 4. Create the actual transaction
+      await prisma.$transaction(async (tx) => {
+        // Create transaction
+        await tx.transaction.create({
+          data: {
+            userId: routine.userId,
+            accountId: routine.accountId,
+            categoryId: routine.categoryId,
+            type: TransactionType.EXPENSE,
+            amount: routine.amount,
+            description: routine.title + ' (Routine)',
+            merchantName: routine.title,
+            transactionDate: now,
+            source: TransactionSource.MANUAL_WEB, // Or define a SYSTEM source if enum allows
+            isConfirmed: true,
+            isSynced: false, // Will be picked up by sheets sync job if applicable
+          }
+        });
+
+        // Update routine's last processed date
+        await tx.routineExpense.update({
+          where: { id: routine.id },
+          data: { lastProcessedAt: now }
+        });
+      });
+
+      console.log(`[Cron] Generated routine transaction for ${routine.title} (User: ${routine.userId})`);
+    } catch (err) {
+      console.error(`[Cron] Failed to process routine ${routine.id}:`, err);
+    }
+  }
+};

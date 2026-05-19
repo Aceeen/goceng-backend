@@ -15,6 +15,8 @@ import dashboardRouter from './modules/dashboard/dashboard.router';
 import reportRouter from './modules/report/report.router';
 import userRouter from './modules/user/user.router';
 import sheetsRouter from './modules/sheets/sheets.router';
+import { routineRouter } from './modules/routine/routine.router';
+import { initRoutineCron } from './modules/routine/routine.cron';
 
 // Middlewares
 import { authenticate } from './middlewares/authenticate';
@@ -65,6 +67,7 @@ app.use('/v1/categories', authenticate, categoryRouter);
 app.use('/v1/accounts', authenticate, accountRouter);
 app.use('/v1/transactions', authenticate, transactionRouter);
 app.use('/v1/budgets', authenticate, budgetRouter);
+app.use('/v1/routines', routineRouter); // Authenticated internally
 app.use('/v1/dashboard', authenticate, dashboardRouter);
 app.use('/v1/reports', authenticate, reportRouter);
 
@@ -91,5 +94,8 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     }
   });
 });
+
+// Start Cron Workers
+initRoutineCron();
 
 export default app;
