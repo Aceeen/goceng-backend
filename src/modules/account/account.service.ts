@@ -2,16 +2,16 @@ import { AccountType } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 
 export class AccountService {
-  static async getAccountsByUserId(userId: string) {
+  static async getAccountsByMessagingAccountId(messagingAccountId: string) {
     return prisma.account.findMany({
-      where: { userId, isActive: true },
+      where: { messagingAccountId, isActive: true },
     });
   }
 
-  static async createAccount(userId: string, data: { name: string; type: AccountType; initialBalance: number; color?: string; icon?: string }) {
+  static async createAccount(messagingAccountId: string, data: { name: string; type: AccountType; initialBalance: number; color?: string; icon?: string }) {
     return prisma.account.create({
       data: {
-        userId,
+        messagingAccountId,
         name: data.name,
         type: data.type,
         initialBalance: data.initialBalance,
@@ -22,16 +22,16 @@ export class AccountService {
     });
   }
 
-  static async updateAccount(id: string, userId: string, data: { name?: string; color?: string; icon?: string }) {
+  static async updateAccount(id: string, messagingAccountId: string, data: { name?: string; color?: string; icon?: string }) {
     return prisma.account.update({
-      where: { id, userId },
+      where: { id, messagingAccountId },
       data,
     });
   }
 
-  static async deleteAccount(id: string, userId: string) {
+  static async deleteAccount(id: string, messagingAccountId: string) {
     return prisma.account.update({
-      where: { id, userId },
+      where: { id, messagingAccountId },
       data: { isActive: false },
     });
   }

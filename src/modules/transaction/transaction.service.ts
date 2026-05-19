@@ -2,11 +2,11 @@ import { TransactionType } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 
 export class TransactionService {
-  static async getTransactionsByUserId(userId: string, filters: any) {
+  static async getTransactionsByMessagingAccountId(messagingAccountId: string, filters: any) {
     const { page = 1, limit = 20, startDate, endDate, categoryId, accountId, type, search } = filters;
     const skip = (page - 1) * limit;
 
-    const where: any = { userId, deletedAt: null };
+    const where: any = { messagingAccountId, deletedAt: null };
     
     if (startDate || endDate) {
       where.transactionDate = {};
@@ -49,12 +49,12 @@ export class TransactionService {
     };
   }
 
-  static async createTransaction(userId: string, data: any) {
+  static async createTransaction(messagingAccountId: string, data: any) {
     return prisma.$transaction(async (tx) => {
       // 1. Create the Transaction & Items
       const transaction = await tx.transaction.create({
         data: {
-          userId,
+          messagingAccountId,
           accountId: data.accountId,
           categoryId: data.categoryId,
           type: data.type,
@@ -92,10 +92,10 @@ export class TransactionService {
     });
   }
 
-  static async deleteTransaction(id: string, userId: string) {
+  static async deleteTransaction(id: string, messagingAccountId: string) {
     return prisma.$transaction(async (tx) => {
       const transaction = await tx.transaction.findUnique({
-        where: { id, userId }
+        where: { id, messagingAccountId }
       });
 
       if (!transaction || transaction.deletedAt) throw new Error("Not found");

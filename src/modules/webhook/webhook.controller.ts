@@ -69,10 +69,10 @@ const processAsyncPayload = async (payload: any) => {
 
     console.log(`[Webhook] Pesan dari ${fromNumber}, tipe: ${msgType}`);
 
-    // ── Cek user terdaftar ────────────────────────────────────────────────
-    const user = await prisma.user.findFirst({ where: { whatsappNumber: fromNumber } });
-    if (!user) {
-      const loginLink = `${(env as any).FRONTEND_URL}/login?wa=${fromNumber}`;
+    // ── Cek akun terdaftar ────────────────────────────────────────────────
+    const messagingAccount = await prisma.messagingAccount.findFirst({ where: { platform: 'WHATSAPP', externalId: fromNumber } });
+    if (!messagingAccount) {
+      const loginLink = `${(env as any).FRONTEND_URL}/login?platform=WHATSAPP&id=${fromNumber}`;
       await WhatsAppService.sendTextMessage(
         fromNumber,
         `Halo! Selamat datang di *GOCENG* 🤖📊\n\nNomor Anda belum terdaftar. Silakan hubungkan akun Google:\n\n🔗 ${loginLink}\n\nSetelah login, sapa saya kembali!`
@@ -86,13 +86,13 @@ const processAsyncPayload = async (payload: any) => {
 
     // ── ROUTING: Tombol interaktif ────────────────────────────────────────
     if (msgType === 'interactive') {
-      await handleButtonReply(fromNumber, user.id, message.interactive.button_reply.id);
+      await handleButtonReply(fromNumber, messagingAccount.id, message.interactive.button_reply.id);
       return;
     }
 
     // ── ROUTING: Sesi EDITED (user kirim koreksi) ─────────────────────────
     const editingSession = await prisma.transactionSession.findFirst({
-      where: { userId: user.id, status: 'EDITED', expiresAt: { gt: new Date() } },
+      where: { messagingAccountId: messagingAccount.id, status: 'EDITED', expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     });
     if (editingSession && msgType === 'text') {
@@ -102,9 +102,9 @@ const processAsyncPayload = async (payload: any) => {
 
     // ── ROUTING: Pesan baru ───────────────────────────────────────────────
     if (msgType === 'text') {
-      await handleTextMessage(fromNumber, user.id, message.text.body, messageId, categoryNames);
+      await handleTextMessage(fromNumber, messagingAccount.id, message.text.body, messageId, categoryNames);
     } else if (msgType === 'image') {
-      await handleImageMessage(fromNumber, user.id, message.image.id, messageId);
+      await handleImageMessage(fromNumber, messagingAccount.id, message.image.id, messageId);
     } else {
       await WhatsAppService.sendTextMessage(fromNumber, '📎 GOCENG hanya bisa memproses pesan teks atau foto struk ya!');
     }
@@ -117,7 +117,7 @@ const processAsyncPayload = async (payload: any) => {
 // HANDLER: Teks → NLP
 // =============================================================================
 const handleTextMessage = async (
-  fromNumber: string, userId: string,
+  fromNumber: string, messagingAccountId: string,
   text: string, messageId: string, categoryNames: string[]
 ) => {
   await WhatsAppService.sendTextMessage(fromNumber, '⏳ Sedang memproses pesan kamu...');
@@ -132,7 +132,7 @@ const handleTextMessage = async (
     return;
   }
 
-  const session = await createSession(userId, result, { text }, messageId);
+  const session = await createSession(messagingAccountId, 'WHATSAPP', result, { text }, messageId);
   await sendConfirmationMessage(fromNumber, result, session.id);
 };
 
@@ -140,7 +140,7 @@ const handleTextMessage = async (
 // HANDLER: Gambar → OCR (3 case)
 // =============================================================================
 const handleImageMessage = async (
-  fromNumber: string, userId: string,
+  fromNumber: string, messagingAccountId: string,
   mediaId: string, messageId: string
 ) => {
   await WhatsAppService.sendTextMessage(fromNumber, '🔍 Sedang membaca struk kamu...');
@@ -178,14 +178,14 @@ const result = await extractFromImage(base64, 'image/jpeg');
 
   // ── CASE 2: NORMAL — struk IDR ───────────────────────────────────────────
   if (isOCRNormal(result)) {
-    const session = await createSession(userId, result, { mediaId }, messageId);
+    const session = await createSession(messagingAccountId, 'WHATSAPP', result, { mediaId }, messageId);
     await sendConfirmationMessage(fromNumber, result, session.id);
     return;
   }
 
   // ── CASE 3: FOREIGN — struk luar negeri ──────────────────────────────────
   if (isOCRForeign(result)) {
-    const session = await createSession(userId, result, { mediaId }, messageId);
+    const session = await createSession(messagingAccountId, 'WHATSAPP', result, { mediaId }, messageId);
     await sendForeignConfirmationMessage(fromNumber, result, session.id);
     return;
   }
@@ -194,8 +194,8 @@ const result = await extractFromImage(base64, 'image/jpeg');
 // =============================================================================
 // HANDLER: Tombol YA SIMPAN / EDIT / BATAL
 // =============================================================================
-const handleButtonReply = async (fromNumber: string, userId: string, buttonId: string) => {
-  const session = await getPendingSession(userId);
+const handleButtonReply = async (fromNumber: string, messagingAccountId: string, buttonId: string) => {
+  const session = await getPendingSession(messagingAccountId);
 
   if (!session) {
     await WhatsAppService.sendTextMessage(
@@ -208,7 +208,7 @@ const handleButtonReply = async (fromNumber: string, userId: string, buttonId: s
   if (buttonId === BTN_CONFIRM) {
     try {
       const data = session.extractedData as any;
-      const { account } = await saveConfirmedTransaction(userId, data);
+      const { account } = await saveConfirmedTransaction(messagingAccountId, data);
 
       await updateSessionStatus(session.id, 'SAVED');
 

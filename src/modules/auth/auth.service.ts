@@ -4,6 +4,7 @@ import { google } from 'googleapis';
 import { prisma } from '../../config/prisma';
 import { env } from '../../config/env';
 import { encryptToken } from '../../utils/encryption';
+import crypto from 'crypto';
 
 export class AuthService {
   private static hasConfiguredMasterSpreadsheet(): boolean {
@@ -37,13 +38,32 @@ export class AuthService {
    * duplicates the Master Spreadsheet (if needed), and signs a JWT.
    */
   static async processGoogleCallback(code: string, stateString: string = ''): Promise<string> {
-    // 1. Decode State Payload to recover WhatsApp Number
-    let waNumber: string | null = null;
+    // 1. Decode State Payload to recover Platform and External ID
+    let platform: 'TELEGRAM' | 'WHATSAPP' | null = null;
+    let externalId: string | null = null;
     try {
       if (stateString) {
-        const decoded = Buffer.from(stateString, 'base64').toString('utf8');
-        const stateObj = JSON.parse(decoded);
-        waNumber = stateObj.wa || null;
+        const parts = Buffer.from(stateString, 'base64').toString('utf8').split(':');
+        if (parts.length === 3) {
+          const [ivHex, encryptedHex, authTagHex] = parts;
+          const decipher = crypto.createDecipheriv(
+            'aes-256-gcm',
+            Buffer.from(env.TOKEN_ENCRYPTION_KEY, 'hex'),
+            Buffer.from(ivHex, 'hex')
+          );
+          decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
+          let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
+          decrypted += decipher.final('utf8');
+          const stateObj = JSON.parse(decrypted);
+          platform = stateObj.platform || null;
+          externalId = stateObj.externalId || null;
+        } else {
+          // Fallback to unencrypted (legacy or dev)
+          const decoded = Buffer.from(stateString, 'base64').toString('utf8');
+          const stateObj = JSON.parse(decoded);
+          platform = stateObj.platform || null;
+          externalId = stateObj.externalId || null;
+        }
       }
     } catch(e) {
       console.warn('Failed to parse OAuth state object');
@@ -68,7 +88,6 @@ export class AuthService {
         email: userInfo.data.email,
         name: userInfo.data.name || 'User',
         profilePicture: userInfo.data.picture,
-        ...(waNumber ? { whatsappNumber: waNumber } : {})
       },
       create: {
         googleId: userInfo.data.id,
@@ -76,9 +95,21 @@ export class AuthService {
         name: userInfo.data.name || 'User',
         profilePicture: userInfo.data.picture,
         currencyCode: 'IDR',
-        whatsappNumber: waNumber,
       },
     });
+
+    let messagingAccount = null;
+    if (platform && externalId) {
+      messagingAccount = await prisma.messagingAccount.upsert({
+        where: { platform_externalId: { platform, externalId } },
+        update: {},
+        create: {
+          userId: user.id,
+          platform,
+          externalId,
+        }
+      });
+    }
 
     // 5. Encrypt and Upsert OAuth Tokens
     if (tokens.access_token && tokens.refresh_token) {
@@ -105,58 +136,78 @@ export class AuthService {
     }
 
     // 6. Handle master spreadsheet duplication and folder configuration if missing
-    let spreadsheetId = user.spreadsheetId;
-    let googleDriveFolderId = user.googleDriveFolderId || null;
+    let spreadsheetId = messagingAccount?.spreadsheetId || null;
+    let googleDriveFolderId = messagingAccount?.googleDriveFolderId || null;
 
-    if (!spreadsheetId || !googleDriveFolderId) {
+    if (messagingAccount && (!spreadsheetId || !googleDriveFolderId)) {
       if (!this.hasConfiguredMasterSpreadsheet()) {
         console.warn(
           '[Drive Setup] Skipped because MASTER_SPREADSHEET_ID is still a placeholder or is not configured.'
         );
       } else {
-        console.log(`[Drive Setup] Constructing folder tree for new user ${user.id}...`);
+        console.log(`[Drive Setup] Constructing folder tree for ${platform} ${externalId}...`);
         const driveAPI = google.drive({ version: 'v3', auth: oauth2Client });
         
         try {
-          // 5a. Create GOCENG Master Folder
-          const rootFolderRes = await driveAPI.files.create({
-            requestBody: { name: 'GOCENG', mimeType: 'application/vnd.google-apps.folder' },
-            fields: 'id'
+          // 5a. Check or Create GOCENG Master Folder
+          let rootFolderId: string;
+          const rootSearch = await driveAPI.files.list({
+            q: "name='GOCENG' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            fields: 'files(id)'
           });
-          const rootFolderId = rootFolderRes.data.id!;
+          if (rootSearch.data.files && rootSearch.data.files.length > 0) {
+            rootFolderId = rootSearch.data.files[0].id!;
+          } else {
+            const rootFolderRes = await driveAPI.files.create({
+              requestBody: { name: 'GOCENG', mimeType: 'application/vnd.google-apps.folder' },
+              fields: 'id'
+            });
+            rootFolderId = rootFolderRes.data.id!;
+          }
 
-          // 5b. Create Bukti Transaksi Sub-folder
-          const subFolderRes = await driveAPI.files.create({
+          // 5b. Create Platform Specific Folder
+          const platformFolderName = `${(platform ?? 'unknown').toLowerCase()}_${externalId}`;
+          const platformFolderRes = await driveAPI.files.create({
             requestBody: { 
-              name: 'bukti_transaksi', 
+              name: platformFolderName, 
               mimeType: 'application/vnd.google-apps.folder',
               parents: [rootFolderId]
             },
             fields: 'id'
           });
+          const platformFolderId = platformFolderRes.data.id!;
+
+          // 5c. Create Bukti Transaksi Sub-folder
+          const subFolderRes = await driveAPI.files.create({
+            requestBody: { 
+              name: 'bukti_transaksi', 
+              mimeType: 'application/vnd.google-apps.folder',
+              parents: [platformFolderId]
+            },
+            fields: 'id'
+          });
           googleDriveFolderId = subFolderRes.data.id!;
 
-          // 5c. Copy Spreadsheet Template
+          // 5d. Copy Spreadsheet Template
           const copyRes = await driveAPI.files.copy({
             fileId: env.MASTER_SPREADSHEET_ID,
             requestBody: {
-              name: `GOCENG Record - ${user.name}`,
-              parents: [rootFolderId]
+              name: `GOCENG Record - ${platformFolderName}`,
+              parents: [platformFolderId]
             },
             fields: 'id'
           });
           spreadsheetId = copyRes.data.id!;
           
-          // 5d. Save setup globally
-          await prisma.user.update({
-            where: { id: user.id },
+          // 5e. Save setup to MessagingAccount
+          await prisma.messagingAccount.update({
+            where: { id: messagingAccount.id },
             data: { spreadsheetId, googleDriveFolderId },
           });
 
           console.log(`[Drive Setup] Complete. Sheet: ${spreadsheetId}, Folder: ${googleDriveFolderId}`);
         } catch (error) {
           console.error(`[Drive Setup] Failed to create folder structure:`, error);
-          // Will fallback to null if the user's template fails to clone
         }
       }
     }
@@ -166,7 +217,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       name: user.name,
-      isOnboarded: user.isOnboarded,
+      isOnboarded: messagingAccount?.isOnboarded || false,
       spreadsheetId,
     };
 

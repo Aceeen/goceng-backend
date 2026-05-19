@@ -1,13 +1,13 @@
 import { prisma } from '../../config/prisma';
 
 export class BudgetService {
-  static async getBudgets(userId: string) {
+  static async getBudgets(messagingAccountId: string) {
     const today = new Date();
     const currentMonth = today.getMonth() + 1;
     const currentYear = today.getFullYear();
 
     const budgets = await prisma.budget.findMany({
-      where: { userId, month: currentMonth, year: currentYear },
+      where: { messagingAccountId, month: currentMonth, year: currentYear },
       include: { category: true }
     });
 
@@ -18,7 +18,7 @@ export class BudgetService {
       budgets.map(async (b) => {
         const agg = await prisma.transaction.aggregate({
           where: {
-            userId,
+            messagingAccountId,
             categoryId: b.categoryId,
             type: 'EXPENSE',
             deletedAt: null,
@@ -57,11 +57,11 @@ export class BudgetService {
     return budgetsWithProgress;
   }
 
-  static async upsertBudget(userId: string, data: { categoryId: string; limitAmount: number; month: number; year: number; notes?: string }) {
+  static async upsertBudget(messagingAccountId: string, data: { categoryId: string; limitAmount: number; month: number; year: number; notes?: string }) {
     return prisma.budget.upsert({
       where: {
-        userId_categoryId_month_year: {
-          userId,
+        messagingAccountId_categoryId_month_year: {
+          messagingAccountId,
           categoryId: data.categoryId,
           month: data.month,
           year: data.year
@@ -72,7 +72,7 @@ export class BudgetService {
         notes: data.notes
       },
       create: {
-        userId,
+        messagingAccountId,
         categoryId: data.categoryId,
         month: data.month,
         year: data.year,
@@ -82,9 +82,9 @@ export class BudgetService {
     });
   }
 
-  static async deleteBudget(id: string, userId: string) {
+  static async deleteBudget(id: string, messagingAccountId: string) {
     const result = await prisma.budget.deleteMany({
-      where: { id, userId }
+      where: { id, messagingAccountId }
     });
     if (result.count === 0) throw new Error("Budget not found");
     return result;

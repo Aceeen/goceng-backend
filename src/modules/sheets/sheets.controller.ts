@@ -4,15 +4,18 @@ import { prisma } from '../../config/prisma';
 
 export const syncTransactions = async (req: Request, res: Response) => {
   try {
-    const userId = req.params.userId;
-    
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.spreadsheetId) {
-      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'User lacking active spreadsheet integration' } });
+    const messagingAccountId = req.params.messagingAccountId;
+
+    const messagingAccount = await prisma.messagingAccount.findUnique({
+      where: { id: messagingAccountId },
+      select: { id: true, userId: true, spreadsheetId: true }
+    });
+    if (!messagingAccount || !messagingAccount.spreadsheetId) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Messaging account lacking active spreadsheet integration' } });
     }
 
     const unsyncedTransactions = await prisma.transaction.findMany({
-      where: { userId, isSynced: false, deletedAt: null },
+      where: { messagingAccountId, isSynced: false, deletedAt: null },
       include: { category: true, account: true }
     });
 
@@ -28,7 +31,7 @@ export const syncTransactions = async (req: Request, res: Response) => {
         transactionDate: tx.transactionDate.toISOString().split('T')[0],
         currentBalance: 'N/A' // Requires passing account balances tracking
       };
-      await SheetsService.appendTransaction(userId, user.spreadsheetId, mappedTx);
+      await SheetsService.appendTransaction(messagingAccount.userId, messagingAccount.spreadsheetId, mappedTx);
     }
 
     // Mark as synced

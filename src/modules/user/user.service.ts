@@ -9,11 +9,18 @@ export class UserService {
         email: true,
         name: true,
         profilePicture: true,
-        whatsappNumber: true,
-        spreadsheetId: true,
         currencyCode: true,
-        isOnboarded: true,
-        createdAt: true
+        createdAt: true,
+        messagingAccounts: {
+          select: {
+            id: true,
+            platform: true,
+            externalId: true,
+            spreadsheetId: true,
+            googleDriveFolderId: true,
+            createdAt: true,
+          }
+        }
       }
     });
 
@@ -26,20 +33,16 @@ export class UserService {
       where: { id: userId },
       data: {
         name: data.name,
-        whatsappNumber: data.whatsappNumber,
         currencyCode: data.currencyCode,
-        isOnboarded: data.isOnboarded
       },
       select: {
         id: true,
         email: true,
         name: true,
         profilePicture: true,
-        whatsappNumber: true,
-        spreadsheetId: true,
         currencyCode: true,
-        isOnboarded: true,
-        createdAt: true
+        createdAt: true,
+        messagingAccounts: true
       }
     });
   }

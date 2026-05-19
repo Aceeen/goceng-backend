@@ -8,16 +8,29 @@ import { UserService } from '../user/user.service';
  * Initiates the Google OAuth login flow.
  */
 export const googleLogin = (req: Request, res: Response) => {
-  const waNumber = req.query.wa as string;
+  const tg = req.query.tg as string;
+  const wa = req.query.wa as string;
 
-  // We wrap any custom params (like wa mapping) into the standard CSRF 'state' packet
-  // so Google bounces it back to us untouched.
+  const platform = tg ? 'TELEGRAM' : wa ? 'WHATSAPP' : null;
+  const externalId = tg || wa || null;
+
   const stateObj = {
     csrf: crypto.randomBytes(16).toString('hex'),
-    wa: waNumber || null
+    platform,
+    externalId,
   };
-  const state = Buffer.from(JSON.stringify(stateObj)).toString('base64');
+
+  let state = Buffer.from(JSON.stringify(stateObj)).toString('base64');
   
+  if (platform && externalId) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(env.TOKEN_ENCRYPTION_KEY, 'hex'), iv);
+    let encrypted = cipher.update(JSON.stringify(stateObj), 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    const authTag = cipher.getAuthTag().toString('hex');
+    state = Buffer.from(`${iv.toString('hex')}:${encrypted}:${authTag}`).toString('base64');
+  }
+
   const url = AuthService.getGoogleAuthUrl(state);
   res.redirect(url);
 };

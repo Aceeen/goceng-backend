@@ -10,7 +10,9 @@ export const getReportData = async (req: Request, res: Response) => {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'month and year are required' } });
     }
 
-    const data = await ReportService.getReportData(req.user!.sub, month, year);
+    const messagingAccountId = req.headers['x-messaging-account-id'] as string;
+    if (!messagingAccountId) return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Missing X-Messaging-Account-Id header' } });
+    const data = await ReportService.getReportData(messagingAccountId, month, year);
     res.json(data);
   } catch (error) {
     console.error(error);

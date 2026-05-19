@@ -6,16 +6,17 @@ type WeekdayKey = typeof WEEKDAY_ORDER[number];
 const weekdayByJsDay: WeekdayKey[] = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
 export class ReportService {
-  static async getReportData(userId: string, month: number, year: number) {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new Error('User not found');
+  static async getReportData(messagingAccountId: string, month: number, year: number) {
+    const accountMeta = await prisma.messagingAccount.findUnique({ where: { id: messagingAccountId }, include: { user: true } });
+    if (!accountMeta) throw new Error('Account not found');
+    const user = accountMeta.user;
 
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59, 999);
 
     const transactions = await prisma.transaction.findMany({
       where: {
-        userId,
+        messagingAccountId,
         deletedAt: null,
         transactionDate: { gte: startDate, lte: endDate },
       },
@@ -89,7 +90,7 @@ export class ReportService {
       .sort((a, b) => b.total - a.total);
 
     const accounts = await prisma.account.findMany({
-      where: { userId, isActive: true },
+      where: { messagingAccountId, isActive: true },
     });
 
     const formattedAccounts = accounts.map((account) => ({
@@ -99,7 +100,7 @@ export class ReportService {
     }));
 
     const budgets = await prisma.budget.findMany({
-      where: { userId, month, year },
+      where: { messagingAccountId, month, year },
       include: { category: true },
     });
 

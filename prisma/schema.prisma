@@ -14,21 +14,44 @@ model User {
   email               String    @unique  
   name                String  
   profilePicture      String?   @map("profile_picture")  
-  whatsappNumber      String?   @unique @map("whatsapp_number")  
-  spreadsheetId       String?   @map("spreadsheet_id")  
-  googleDriveFolderId String?   @map("google_drive_folder_id")  
   currencyCode        String    @default("IDR") @map("currency_code")  
-  isOnboarded         Boolean   @default(false) @map("is_onboarded")  
   createdAt           DateTime  @default(now()) @map("created_at")  
   updatedAt           DateTime  @updatedAt @map("updated_at")  
   oauthToken          OAuthToken?  
-  accounts            Account[]  
-  transactions        Transaction[]  
-  budgets             Budget[]  
-  transactionSessions TransactionSession[]  
-  routineExpenses     RoutineExpense[]
+  messagingAccounts   MessagingAccount[]
+  
   @@map("users")  
 } 
+
+model MessagingAccount {
+  id                  String   @id @default(cuid())
+  userId              String   @map("user_id")
+  platform            Platform
+  externalId          String   @map("external_id")
+  
+  spreadsheetId       String?  @map("spreadsheet_id")
+  googleDriveFolderId String?  @map("google_drive_folder_id")
+  isOnboarded         Boolean  @default(false) @map("is_onboarded")
+  
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  transactions        Transaction[]
+  accounts            Account[]
+  budgets             Budget[]
+  routineExpenses     RoutineExpense[]
+  transactionSessions TransactionSession[]
+
+  @@unique([platform, externalId])
+  @@map("messaging_accounts")
+}
+
+enum Platform {
+  WHATSAPP
+  TELEGRAM
+}
   
 model OAuthToken {  
   id           String   @id @default(cuid())  
@@ -45,20 +68,20 @@ model OAuthToken {
 } 
   
 model Account {  
-  id             String      @id @default(cuid())  
-  userId         String      @map("user_id")  
-  name           String  
-  type           AccountType  
-  initialBalance Decimal     @default(0) @map("initial_balance") @db.Decimal(15,2)  
-  currentBalance Decimal     @default(0) @map("current_balance") @db.Decimal(15,2)  
-  color          String?  
-  icon           String?  
-  isActive       Boolean     @default(true) @map("is_active")  
-  createdAt      DateTime    @default(now()) @map("created_at")  
-  updatedAt      DateTime    @updatedAt @map("updated_at")  
-  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)  
-  transactions   Transaction[]  
-  routineExpenses RoutineExpense[]
+  id                 String      @id @default(cuid())  
+  messagingAccountId String      @map("messaging_account_id")  
+  name               String  
+  type               AccountType  
+  initialBalance     Decimal     @default(0) @map("initial_balance") @db.Decimal(15,2)  
+  currentBalance     Decimal     @default(0) @map("current_balance") @db.Decimal(15,2)  
+  color              String?  
+  icon               String?  
+  isActive           Boolean     @default(true) @map("is_active")  
+  createdAt          DateTime    @default(now()) @map("created_at")  
+  updatedAt          DateTime    @updatedAt @map("updated_at")  
+  messagingAccount   MessagingAccount @relation(fields: [messagingAccountId], references: [id], onDelete: Cascade)  
+  transactions       Transaction[]  
+  routineExpenses    RoutineExpense[]
   @@map("accounts")  
 } 
 
@@ -92,32 +115,32 @@ enum CategoryType {
 }  
   
 model Transaction {  
-  id              String            @id @default(cuid())  
-  userId          String            @map("user_id")  
-  accountId       String            @map("account_id")  
-  categoryId      String?           @map("category_id")  
-  type            TransactionType  
-  amount          Decimal           @db.Decimal(15,2)  
-  description     String?  
-  merchantName    String?           @map("merchant_name")  
-  transactionDate DateTime          @map("transaction_date")  
-  source          TransactionSource @default(MANUAL_WEB)  
-  rawInput        String?           @map("raw_input")  
-  imageUrl        String?           @map("image_url")  
-  sheetsRowIndex  Int?              @map("sheets_row_index")  
-  isSynced        Boolean           @default(false) @map("is_synced")  
-  isConfirmed     Boolean           @default(true) @map("is_confirmed")  
-  deletedAt       DateTime?         @map("deleted_at")  
-  createdAt       DateTime          @default(now()) @map("created_at")  
-  updatedAt       DateTime          @updatedAt @map("updated_at")  
-  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)  
-  account         Account           @relation(fields: [accountId], references: [id])  
-  category        Category?         @relation(fields: [categoryId], references: [id])  
-  items           TransactionItem[]  
+  id                 String            @id @default(cuid())  
+  messagingAccountId String            @map("messaging_account_id")  
+  accountId          String            @map("account_id")  
+  categoryId         String?           @map("category_id")  
+  type               TransactionType  
+  amount             Decimal           @db.Decimal(15,2)  
+  description        String?  
+  merchantName       String?           @map("merchant_name")  
+  transactionDate    DateTime          @map("transaction_date")  
+  source             TransactionSource @default(MANUAL_WEB)  
+  rawInput           String?           @map("raw_input")  
+  imageUrl           String?           @map("image_url")  
+  sheetsRowIndex     Int?              @map("sheets_row_index")  
+  isSynced           Boolean           @default(false) @map("is_synced")  
+  isConfirmed        Boolean           @default(true) @map("is_confirmed")  
+  deletedAt          DateTime?         @map("deleted_at")  
+  createdAt          DateTime          @default(now()) @map("created_at")  
+  updatedAt          DateTime          @updatedAt @map("updated_at")  
+  messagingAccount   MessagingAccount  @relation(fields: [messagingAccountId], references: [id], onDelete: Cascade)  
+  account            Account           @relation(fields: [accountId], references: [id])  
+  category           Category?         @relation(fields: [categoryId], references: [id])  
+  items              TransactionItem[]  
   
-  @@index([userId, transactionDate])  
-  @@index([userId, categoryId])  
-  @@index([userId, deletedAt])  
+  @@index([messagingAccountId, transactionDate])  
+  @@index([messagingAccountId, categoryId])  
+  @@index([messagingAccountId, deletedAt])  
   @@map("transactions")  
 } 
 
@@ -129,7 +152,9 @@ enum TransactionType   {
 
 enum TransactionSource { 
   WHATSAPP_OCR  
-  WHATSAPP_TEXT  
+  WHATSAPP_TEXT
+  TELEGRAM_OCR
+  TELEGRAM_TEXT
   MANUAL_WEB 
 }  
   
@@ -146,42 +171,42 @@ model TransactionItem {
 } 
   
 model Budget {  
-  id          String   @id @default(cuid())  
-  userId      String   @map("user_id")  
-  categoryId  String   @map("category_id")  
-  limitAmount Decimal  @map("limit_amount") @db.Decimal(15,2)  
-  month       Int  
-  year        Int  
-  notes       String?  
-  createdAt   DateTime @default(now()) @map("created_at")  
-  updatedAt   DateTime @updatedAt @map("updated_at")  
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)  
-  category    Category @relation(fields: [categoryId], references: [id])  
+  id                 String           @id @default(cuid())  
+  messagingAccountId String           @map("messaging_account_id")  
+  categoryId         String           @map("category_id")  
+  limitAmount        Decimal          @map("limit_amount") @db.Decimal(15,2)  
+  month              Int  
+  year               Int  
+  notes              String?  
+  createdAt          DateTime         @default(now()) @map("created_at")  
+  updatedAt          DateTime         @updatedAt @map("updated_at")  
+  messagingAccount   MessagingAccount @relation(fields: [messagingAccountId], references: [id], onDelete: Cascade)  
+  category           Category         @relation(fields: [categoryId], references: [id])  
   
-  @@unique([userId, categoryId, month, year])  
+  @@unique([messagingAccountId, categoryId, month, year])  
   @@map("budgets")  
 } 
   
 model RoutineExpense {
-  id              String           @id @default(cuid())
-  userId          String           @map("user_id")
-  accountId       String           @map("account_id")
-  categoryId      String?          @map("category_id")
-  title           String
-  amount          Decimal          @db.Decimal(15,2)
-  frequency       ExpenseFrequency
-  startDate       DateTime         @map("start_date")
-  endDate         DateTime?        @map("end_date")
-  lastProcessedAt DateTime?        @map("last_processed_at")
-  isActive        Boolean          @default(true) @map("is_active")
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  id                 String           @id @default(cuid())
+  messagingAccountId String           @map("messaging_account_id")
+  accountId          String           @map("account_id")
+  categoryId         String?          @map("category_id")
+  title              String
+  amount             Decimal          @db.Decimal(15,2)
+  frequency          ExpenseFrequency
+  startDate          DateTime         @map("start_date")
+  endDate            DateTime?        @map("end_date")
+  lastProcessedAt    DateTime?        @map("last_processed_at")
+  isActive           Boolean          @default(true) @map("is_active")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
 
-  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account         Account          @relation(fields: [accountId], references: [id])
-  category        Category?        @relation(fields: [categoryId], references: [id])
+  messagingAccount   MessagingAccount @relation(fields: [messagingAccountId], references: [id], onDelete: Cascade)
+  account            Account          @relation(fields: [accountId], references: [id])
+  category           Category?        @relation(fields: [categoryId], references: [id])
 
-  @@index([userId, isActive])
+  @@index([messagingAccountId, isActive])
   @@map("routine_expenses")
 }
 
@@ -193,18 +218,19 @@ enum ExpenseFrequency {
 } 
   
 model TransactionSession {  
-  id            String        @id @default(cuid())  
-  userId        String        @map("user_id")  
-  waMessageId   String?       @unique @map("wa_message_id")  
-  status        SessionStatus @default(PENDING)  
-  extractedData Json          @map("extracted_data")  
-  rawPayload    Json          @map("raw_payload")  
-  expiresAt     DateTime      @map("expires_at")  
-  createdAt     DateTime      @default(now()) @map("created_at")  
-  updatedAt     DateTime      @updatedAt @map("updated_at")  
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)  
+  id                 String           @id @default(cuid())  
+  messagingAccountId String           @map("messaging_account_id")  
+  externalMessageId  String?          @unique @map("external_message_id")  
+  platform           Platform
+  status             SessionStatus    @default(PENDING)  
+  extractedData      Json             @map("extracted_data")  
+  rawPayload         Json             @map("raw_payload")  
+  expiresAt          DateTime         @map("expires_at")  
+  createdAt          DateTime         @default(now()) @map("created_at")  
+  updatedAt          DateTime         @updatedAt @map("updated_at")  
+  messagingAccount   MessagingAccount @relation(fields: [messagingAccountId], references: [id], onDelete: Cascade)  
   
-  @@index([userId, status])  
+  @@index([messagingAccountId, status])  
   @@map("transaction_sessions")  
 } 
 
@@ -238,4 +264,4 @@ enum LogStatus {
   SUCCESS  
   FAILED  
   WARNING 
-} 
+}

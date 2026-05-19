@@ -48,7 +48,7 @@ export class DashboardService {
     };
   }
 
-  static async getSummary(userId: string) {
+  static async getSummary(messagingAccountId: string) {
     const today = new Date();
     const currentMonth = today.getMonth() + 1;
     const currentYear = today.getFullYear();
@@ -66,11 +66,11 @@ export class DashboardService {
       budgets,
     ] = await Promise.all([
       prisma.account.findMany({
-        where: { userId, isActive: true },
+        where: { messagingAccountId, isActive: true },
       }),
       prisma.transaction.findMany({
         where: {
-          userId,
+          messagingAccountId,
           deletedAt: null,
           transactionDate: { gte: startOfMonth, lte: endOfMonth },
         },
@@ -78,7 +78,7 @@ export class DashboardService {
       }),
       prisma.transaction.findMany({
         where: {
-          userId,
+          messagingAccountId,
           deletedAt: null,
           transactionDate: { gte: startOfPreviousMonth, lte: endOfPreviousMonth },
         },
@@ -89,7 +89,7 @@ export class DashboardService {
       }),
       prisma.transaction.findMany({
         where: {
-          userId,
+          messagingAccountId,
           deletedAt: null,
         },
         take: 5,
@@ -98,7 +98,7 @@ export class DashboardService {
       }),
       prisma.transaction.findMany({
         where: {
-          userId,
+          messagingAccountId,
           deletedAt: null,
         },
         orderBy: { transactionDate: 'desc' },
@@ -106,7 +106,7 @@ export class DashboardService {
           transactionDate: true,
         },
       }),
-      BudgetService.getBudgets(userId),
+      BudgetService.getBudgets(messagingAccountId),
     ]);
 
     let totalBalance = 0;
@@ -222,8 +222,8 @@ export class DashboardService {
     };
   }
 
-  static async getCashflow(userId: string) {
-    const summary = await this.getSummary(userId);
+  static async getCashflow(messagingAccountId: string) {
+    const summary = await this.getSummary(messagingAccountId);
     return summary.cashFlowByWeek;
   }
 }

@@ -32,7 +32,7 @@ function getTransactionSource(data: ExtractedData): 'WHATSAPP_OCR' | 'WHATSAPP_T
   return isNLPResult(data) ? 'WHATSAPP_TEXT' : 'WHATSAPP_OCR';
 }
 
-export async function saveConfirmedTransaction(userId: string, data: ExtractedData) {
+export async function saveConfirmedTransaction(messagingAccountId: string, data: ExtractedData) {
   // OCR blur tidak boleh disimpan karena data transaksi tidak lengkap
   if (!isNLPResult(data) && isOCRBlur(data)) {
     throw new Error('OCR_RESULT_BLUR_CANNOT_SAVE');
@@ -42,13 +42,13 @@ const account = data.accountId
   ? await prisma.account.findFirst({
       where: {
         id: data.accountId,
-        userId,
+        messagingAccountId,
         isActive: true,
       },
     })
   : await prisma.account.findFirst({
       where: {
-        userId,
+        messagingAccountId,
         isActive: true,
       },
       orderBy: {
@@ -117,7 +117,7 @@ if (data.suggestedCategory) {
   const [transaction] = await prisma.$transaction([
     prisma.transaction.create({
       data: {
-        userId,
+        messagingAccountId,
         accountId,
         categoryId: category?.id ?? null,
         type: transactionType,
@@ -159,12 +159,12 @@ if (data.suggestedCategory) {
     },
   });
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { spreadsheetId: true },
+  const accountMeta = await prisma.messagingAccount.findUnique({
+    where: { id: messagingAccountId },
+    select: { spreadsheetId: true, userId: true },
   });
 
-const spreadsheetId = user?.spreadsheetId;
+const spreadsheetId = accountMeta?.spreadsheetId;
 
 if (spreadsheetId) {
   setImmediate(async () => {
@@ -177,8 +177,8 @@ if (spreadsheetId) {
         },
       });
 
-      if (fullTx) {
-        await SheetsService.appendTransaction(userId, spreadsheetId, {
+      if (fullTx && accountMeta?.userId) {
+        await SheetsService.appendTransaction(accountMeta.userId, spreadsheetId, {
           ...fullTx,
           transactionDate: formatDate(fullTx.transactionDate),
           amount: Number(fullTx.amount),

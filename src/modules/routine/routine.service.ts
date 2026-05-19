@@ -2,7 +2,7 @@ import { prisma } from '../../config/prisma';
 import { ExpenseFrequency } from '@prisma/client';
 
 export interface CreateRoutineDTO {
-  userId: string;
+  messagingAccountId: string;
   accountId: string;
   categoryId?: string;
   title: string;
@@ -27,9 +27,9 @@ export class RoutineService {
   /**
    * Retrieves all routine expenses for a given user.
    */
-  static async getUserRoutines(userId: string) {
+  static async getUserRoutines(messagingAccountId: string) {
     return prisma.routineExpense.findMany({
-      where: { userId },
+      where: { messagingAccountId },
       include: {
         account: true,
         category: true,
@@ -44,7 +44,7 @@ export class RoutineService {
   static async createRoutine(data: CreateRoutineDTO) {
     return prisma.routineExpense.create({
       data: {
-        userId: data.userId,
+        messagingAccountId: data.messagingAccountId,
         accountId: data.accountId,
         categoryId: data.categoryId,
         title: data.title,
@@ -59,10 +59,10 @@ export class RoutineService {
   /**
    * Updates an existing routine expense.
    */
-  static async updateRoutine(id: string, userId: string, data: UpdateRoutineDTO) {
+  static async updateRoutine(id: string, messagingAccountId: string, data: UpdateRoutineDTO) {
     // Verify ownership
     const routine = await prisma.routineExpense.findFirst({
-      where: { id, userId }
+      where: { id, messagingAccountId }
     });
 
     if (!routine) {
@@ -87,9 +87,9 @@ export class RoutineService {
   /**
    * Deletes a routine expense.
    */
-  static async deleteRoutine(id: string, userId: string) {
+  static async deleteRoutine(id: string, messagingAccountId: string) {
     const routine = await prisma.routineExpense.findFirst({
-      where: { id, userId }
+      where: { id, messagingAccountId }
     });
 
     if (!routine) {

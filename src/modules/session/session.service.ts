@@ -9,17 +9,19 @@ const SESSION_EXPIRY_MINUTES = 15;
  * Status awal PENDING — menunggu konfirmasi user.
  */
 export async function createSession(
-  userId: string,
+  messagingAccountId: string,
+  platform: 'WHATSAPP' | 'TELEGRAM',
   extractedData: object,
   rawPayload: object,
-  waMessageId?: string
+  externalMessageId?: string
 ) {
   const expiresAt = new Date(Date.now() + SESSION_EXPIRY_MINUTES * 60 * 1000);
 
   return prisma.transactionSession.create({
     data: {
-      userId,
-      waMessageId: waMessageId ?? null,
+      messagingAccountId,
+      platform,
+      externalMessageId: externalMessageId ?? null,
       status:      'PENDING',   // valid: ini create, bukan update
       extractedData,
       rawPayload,
@@ -32,10 +34,10 @@ export async function createSession(
  * Ambil session PENDING milik user yang belum expired.
  * Dipakai saat user balas tombol interaktif.
  */
-export async function getPendingSession(userId: string) {
+export async function getPendingSession(messagingAccountId: string) {
   return prisma.transactionSession.findFirst({
     where: {
-      userId,
+      messagingAccountId,
       status:    'PENDING',
       expiresAt: { gt: new Date() },
     },

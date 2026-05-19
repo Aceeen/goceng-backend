@@ -72,7 +72,7 @@ export const processRoutineExpenses = async () => {
         // Create transaction
         await tx.transaction.create({
           data: {
-            userId: routine.userId,
+            messagingAccountId: routine.messagingAccountId,
             accountId: routine.accountId,
             categoryId: routine.categoryId,
             type: TransactionType.EXPENSE,
@@ -93,7 +93,7 @@ export const processRoutineExpenses = async () => {
         });
       });
 
-      console.log(`[Cron] Generated routine transaction for ${routine.title} (User: ${routine.userId})`);
+      console.log(`[Cron] Generated routine transaction for ${routine.title} (Account: ${routine.messagingAccountId})`);
     } catch (err) {
       console.error(`[Cron] Failed to process routine ${routine.id}:`, err);
     }

@@ -10,6 +10,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   
   FRONTEND_URL: z.string().url(),
+  BACKEND_URL: z.string().url().optional(),
   
   DATABASE_URL: z.string().url(),
   DIRECT_URL: z.string().url(),
@@ -22,6 +23,8 @@ const envSchema = z.object({
   WA_VERIFY_TOKEN: z.string().min(1, 'WA Verify Token is required'),
   WA_ACCESS_TOKEN: z.string().min(1, 'WA Access Token is required'),
   WA_PHONE_NUMBER_ID: z.string().min(1, 'WA Phone Number ID is required'),
+
+  TELEGRAM_BOT_TOKEN: z.string().optional().default(''),
 
   JWT_SECRET: z.string().min(32, 'JWT Secret must be at least 32 characters'),
   TOKEN_ENCRYPTION_KEY: z.string().length(64, 'Token Encryption Key must be a 64-char hex string (32 bytes)'),
