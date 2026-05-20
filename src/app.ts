@@ -29,7 +29,7 @@ app.use(helmet());
 
 // CORS config for frontend domain
 app.use(cors({
-  origin: env.NODE_ENV === 'production' ? 'https://goceng.app' : '*',
+  origin: env.NODE_ENV === 'production' ? env.FRONTEND_URL : '*',
   credentials: true,
 }));
 

@@ -5,18 +5,17 @@ services:
   - type: web
     name: goceng-backend
     env: node
-    region: singapore # Closest to Indonesia for lower latency
     buildCommand: npm install && npm run build
     startCommand: npm start
-
+    
     # Enable automatic deployments when code is pushed to the target branch
     autoDeploy: true
 
-    # Health checks ensuring zero-downtime rollouts
-    healthCheckPath: /health
-
     # Scaling configuration
     plan: free # Change to 'starter' or higher for production scale
+    
+    # Health checks ensuring zero-downtime rollouts
+    healthCheckPath: /health
 
     # Injecting placeholders to ensure Render prompts you for variables upon deployment
     envVars:
@@ -25,8 +24,6 @@ services:
       - key: PORT
         value: 3000
       - key: FRONTEND_URL
-        sync: false
-      - key: BACKEND_URL
         sync: false
       - key: DATABASE_URL
         sync: false
@@ -45,12 +42,6 @@ services:
       - key: WA_ACCESS_TOKEN
         sync: false
       - key: WA_PHONE_NUMBER_ID
-        sync: false
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: GROQ_API_KEY
         sync: false
       - key: JWT_SECRET
         sync: false
