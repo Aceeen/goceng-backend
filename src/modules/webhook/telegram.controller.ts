@@ -123,6 +123,12 @@ const processTelegramPayload = async (payload: any) => {
     const allCategories = await prisma.category.findMany({ select: { name: true }, orderBy: { name: 'asc' } });
     const categoryNames = allCategories.map((c) => c.name);
 
+    // Handle slash commands
+    if (textBody?.startsWith('/')) {
+      await sendMainMenu(externalId);
+      return;
+    }
+
     if (textBody) {
       await handleTextMessage(externalId, messagingAccount.id, textBody, messageId!, categoryNames);
     } else if (mediaId) {
