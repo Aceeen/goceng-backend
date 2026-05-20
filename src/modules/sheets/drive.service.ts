@@ -25,13 +25,19 @@ export class DriveService {
   /**
    * Uploads an image buffer natively to the User's Google Drive as a public viewable file.
    * Returns the webViewLink so it can be saved in Postgres and clicked via React.
+   * 
+   * @param userId         - Google user ID (used to authenticate OAuth client)
+   * @param messagingAccountId - MessagingAccount ID (used to look up the correct Drive folder)
    */
-  static async uploadReceipt(userId: string, imageBuffer: Buffer, mimeType: string, fileName: string): Promise<string | null> {
+  static async uploadReceipt(userId: string, messagingAccountId: string, imageBuffer: Buffer, mimeType: string, fileName: string): Promise<string | null> {
     await this.authenticateUser(userId);
-    
-    // Grab the folder ID we constructed during onboarding
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    const targetFolderId = user?.googleDriveFolderId;
+
+    // Grab the folder ID from the MessagingAccount (moved from User during multi-platform migration)
+    const account = await prisma.messagingAccount.findUnique({
+      where: { id: messagingAccountId },
+      select: { googleDriveFolderId: true }
+    });
+    const targetFolderId = account?.googleDriveFolderId;
 
     // Convert strict Buffer into a Readable stream for Google Drive Media requirements
     const stream = new Readable();
