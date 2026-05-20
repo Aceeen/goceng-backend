@@ -2,8 +2,6 @@ import { Request, Response } from 'express';
 import { env } from '../../config/env';
 import { TelegramService } from './telegram.service';
 import { prisma } from '../../config/prisma';
-import fs from 'fs';
-import path from 'path';
 
 // AI Module
 import { extractFromImage, extractFromText, applyUserCorrection } from '../ai/ai.service';
@@ -66,6 +64,12 @@ const processTelegramPayload = async (payload: any) => {
       return;
     }
 
+    // ── ONBOARDING GATE: New users must set up an account first ──────────────
+    if (!messagingAccount.isOnboarded) {
+      await handleOnboarding(externalId, messagingAccount.id, textBody, buttonData);
+      return;
+    }
+
     const allCategories = await prisma.category.findMany({ select: { name: true }, orderBy: { name: 'asc' } });
     const categoryNames = allCategories.map((c) => c.name);
 
@@ -95,6 +99,136 @@ const processTelegramPayload = async (payload: any) => {
     }
   } catch (error) {
     console.error('❌ processTelegramPayload error:', error);
+  }
+};
+
+// =============================================================================
+// ONBOARDING FLOW: Name → Type → Initial Balance → Done
+// =============================================================================
+const OB_ACCOUNT_TYPES: { id: string; title: string }[] = [
+  { id: 'ob_BANK',        title: '🏦 Bank' },
+  { id: 'ob_E_WALLET',    title: '📱 E-Wallet' },
+  { id: 'ob_CASH',        title: '💵 Tunai / Cash' },
+  { id: 'ob_CREDIT_CARD', title: '💳 Kartu Kredit' },
+  { id: 'ob_INVESTMENT',  title: '📈 Investasi' },
+];
+
+const handleOnboarding = async (
+  externalId: string,
+  messagingAccountId: string,
+  textBody: string | null,
+  buttonData: string | null
+) => {
+  const ONBOARDING_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
+
+  // Look for an active onboarding session
+  const session = await prisma.transactionSession.findFirst({
+    where: { messagingAccountId, status: 'PENDING', expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' },
+  });
+  const sessionData = session?.extractedData as any;
+
+  // ── STEP 0: No session yet → welcome + ask for account name ──────────────
+  if (!session || sessionData?.type !== 'ONBOARDING') {
+    await TelegramService.sendTextMessage(
+      externalId,
+      `👋 Selamat datang di *GOCENG*! Akun kamu berhasil terhubung 🎉\n\n` +
+      `Sebelum mulai mencatat transaksi, ayo setup *rekening pertama* kamu.\n\n` +
+      `📝 Apa nama rekeningmu?\n_Contoh: BCA, GoPay, Dompet Tunai_`
+    );
+    await prisma.transactionSession.create({
+      data: {
+        messagingAccountId,
+        platform: 'TELEGRAM',
+        status: 'PENDING',
+        extractedData: { type: 'ONBOARDING', step: 'ASK_ACCOUNT_NAME' },
+        rawPayload: {},
+        expiresAt: new Date(Date.now() + ONBOARDING_EXPIRY_MS),
+      },
+    });
+    return;
+  }
+
+  const step = sessionData.step;
+
+  // ── STEP 1: Received account name → ask type ──────────────────────────────
+  if (step === 'ASK_ACCOUNT_NAME' && textBody) {
+    await prisma.transactionSession.update({
+      where: { id: session.id },
+      data: { extractedData: { type: 'ONBOARDING', step: 'ASK_ACCOUNT_TYPE', name: textBody.trim() } },
+    });
+    await TelegramService.sendInteractiveButtons(
+      externalId,
+      `Oke, rekening *${textBody.trim()}*! Jenis rekeningnya apa?`,
+      OB_ACCOUNT_TYPES
+    );
+    return;
+  }
+
+  // ── STEP 2: Received account type button → ask initial balance ────────────
+  if (step === 'ASK_ACCOUNT_TYPE' && buttonData?.startsWith('ob_')) {
+    const accountType = buttonData.replace('ob_', '');
+    await prisma.transactionSession.update({
+      where: { id: session.id },
+      data: { extractedData: { ...sessionData, step: 'ASK_INITIAL_BALANCE', accountType } },
+    });
+    await TelegramService.sendTextMessage(
+      externalId,
+      `Berapa *saldo awal* rekening *${sessionData.name}*?\n\n` +
+      `Tulis angka saja, contoh: _500000_ atau _1500000_\n` +
+      `(Tulis 0 jika ingin mulai dari nol)`
+    );
+    return;
+  }
+
+  // ── STEP 3: Received initial balance → create account ────────────────────
+  if (step === 'ASK_INITIAL_BALANCE' && textBody) {
+    const cleaned = textBody.replace(/[^0-9]/g, '');
+    const initialBalance = Number(cleaned);
+    if (isNaN(initialBalance) || cleaned === '') {
+      await TelegramService.sendTextMessage(externalId, '❌ Format salah. Tulis angka saja, contoh: _500000_');
+      return;
+    }
+
+    await prisma.account.create({
+      data: {
+        messagingAccountId,
+        name: sessionData.name,
+        type: sessionData.accountType,
+        initialBalance,
+        currentBalance: initialBalance,
+      },
+    });
+
+    await prisma.messagingAccount.update({
+      where: { id: messagingAccountId },
+      data: { isOnboarded: true },
+    });
+
+    await prisma.transactionSession.update({
+      where: { id: session.id },
+      data: { status: 'SAVED' },
+    });
+
+    const balanceFormatted = initialBalance.toLocaleString('id-ID');
+    await TelegramService.sendTextMessage(
+      externalId,
+      `✅ *Rekening ${sessionData.name} berhasil dibuat!*\n` +
+      `💰 Saldo awal: Rp ${balanceFormatted}\n\n` +
+      `🎉 GOCENG siap digunakan! Sekarang kamu bisa:\n` +
+      `• Kirim pesan seperti _"Makan siang 25rb"_\n` +
+      `• Foto struk belanja untuk dicatat otomatis 📸`
+    );
+    return;
+  }
+
+  // ── Fallback: wrong input at current step ─────────────────────────────────
+  if (step === 'ASK_ACCOUNT_NAME') {
+    await TelegramService.sendTextMessage(externalId, '📝 Ketik nama rekeningmu ya, contoh: _BCA_ atau _GoPay_');
+  } else if (step === 'ASK_ACCOUNT_TYPE') {
+    await TelegramService.sendInteractiveButtons(externalId, 'Pilih jenis rekening:', OB_ACCOUNT_TYPES);
+  } else if (step === 'ASK_INITIAL_BALANCE') {
+    await TelegramService.sendTextMessage(externalId, '💰 Tulis saldo awal dalam angka, contoh: _500000_');
   }
 };
 
