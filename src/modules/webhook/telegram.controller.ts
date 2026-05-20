@@ -104,7 +104,7 @@ const processTelegramPayload = async (payload: any) => {
     });
     const menuSessionData = menuSession?.extractedData as any;
 
-    if (menuSession && (menuSessionData?.type === 'ADD_ACCOUNT' || menuSessionData?.type === 'MENU_UBAH_SALDO')) {
+    if (menuSession && (menuSessionData?.type === 'ADD_ACCOUNT' || menuSessionData?.type === 'MENU_UBAH_SALDO' || menuSessionData?.type === 'ROUTINE_ADD' || menuSessionData?.type === 'ROUTINE_EDIT')) {
       await handleMenuRouter(externalId, messagingAccount, null, textBody, menuSession);
       return;
     }
@@ -143,6 +143,7 @@ const sendMainMenu = async (externalId: string, preamble?: string) => {
   await TelegramService.sendInteractiveButtons(externalId, text, [
     { id: 'menu_transaksi', title: '💳 Tambah Transaksi' },
     { id: 'menu_rekening',  title: '💼 Kelola Rekening' },
+    { id: 'menu_rutin',     title: '📅 Pengeluaran Rutin' },
     { id: 'menu_cetak',     title: '🖨️ Cetak Laporan (SPS)' },
   ]);
 };
@@ -212,7 +213,152 @@ const handleMenuRouter = async (
     return;
   }
 
-  // ── Tambah Rekening ──────────────────────────────────────────────────────
+  // ── Rutin main submenu ────────────────────────────────────────────────────
+  if (buttonData === 'menu_rutin') {
+    await TelegramService.sendInteractiveButtons(externalId, '📅 *Pengeluaran Rutin*\n\nMau ngapain?', [
+      { id: 'menu_rutin_tambah', title: '➕ Tambah Rutin Baru' },
+      { id: 'menu_rutin_kelola', title: '📋 Lihat & Kelola Rutin' },
+    ]);
+    return;
+  }
+
+  // ── Rutin: start add flow ─────────────────────────────────────────────────
+  if (buttonData === 'menu_rutin_tambah') {
+    await TelegramService.sendTextMessage(externalId, '➕ *Tambah Pengeluaran Rutin*\n\n📝 Apa nama pengeluaran rutin ini?\n_Contoh: Sewa Kos, Netflix, Uang Bensin_');
+    await prisma.transactionSession.create({ data: {
+      messagingAccountId: account.id, platform: 'TELEGRAM', status: 'PENDING',
+      extractedData: { type: 'ROUTINE_ADD', step: 'ASK_TITLE' }, rawPayload: {},
+      expiresAt: new Date(Date.now() + SESSION_TTL),
+    }});
+    return;
+  }
+
+  // ── Rutin: list for management ────────────────────────────────────────────
+  if (buttonData === 'menu_rutin_kelola') {
+    const routines = await prisma.routineExpense.findMany({
+      where: { messagingAccountId: account.id, isActive: true },
+      select: { id: true, title: true, amount: true, frequency: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!routines.length) {
+      await TelegramService.sendTextMessage(externalId, '📋 Belum ada pengeluaran rutin. Tambah dulu ya!');
+      return;
+    }
+    const FREQ_LABEL: Record<string, string> = { DAILY: 'Harian', WEEKLY: 'Mingguan', MONTHLY: 'Bulanan', ANNUALLY: 'Tahunan' };
+    await TelegramService.sendInteractiveButtons(
+      externalId, '📋 Pilih rutin yang mau dikelola:',
+      routines.map(r => ({ id: `rutin_sel_${r.id}`, title: `${r.title} — Rp ${Number(r.amount).toLocaleString('id-ID')} (${FREQ_LABEL[r.frequency]})` }))
+    );
+    return;
+  }
+
+  // ── Rutin: selected — show actions ────────────────────────────────────────
+  if (buttonData?.startsWith('rutin_sel_')) {
+    const routineId = buttonData.replace('rutin_sel_', '');
+    const routine = await prisma.routineExpense.findFirst({ where: { id: routineId, messagingAccountId: account.id }, select: { title: true, amount: true } });
+    if (!routine) { await TelegramService.sendTextMessage(externalId, '❌ Rutin tidak ditemukan.'); return; }
+    await TelegramService.sendInteractiveButtons(
+      externalId,
+      `📅 *${routine.title}*\nSaat ini: Rp ${Number(routine.amount).toLocaleString('id-ID')}\n\nMau ngapain?`,
+      [
+        { id: `rutin_edit_${routineId}`,  title: '✏️ Edit Jumlah' },
+        { id: `rutin_del_${routineId}`,   title: '🗑️ Nonaktifkan' },
+      ]
+    );
+    return;
+  }
+
+  // ── Rutin: delete (deactivate) ────────────────────────────────────────────
+  if (buttonData?.startsWith('rutin_del_')) {
+    const routineId = buttonData.replace('rutin_del_', '');
+    const routine = await prisma.routineExpense.findFirst({ where: { id: routineId, messagingAccountId: account.id }, select: { title: true } });
+    if (!routine) { await TelegramService.sendTextMessage(externalId, '❌ Rutin tidak ditemukan.'); return; }
+    await prisma.routineExpense.update({ where: { id: routineId }, data: { isActive: false } });
+    await TelegramService.sendTextMessage(externalId, `✅ *${routine.title}* berhasil dinonaktifkan.`);
+    return;
+  }
+
+  // ── Rutin: start edit amount ──────────────────────────────────────────────
+  if (buttonData?.startsWith('rutin_edit_')) {
+    const routineId = buttonData.replace('rutin_edit_', '');
+    const routine = await prisma.routineExpense.findFirst({ where: { id: routineId, messagingAccountId: account.id }, select: { title: true, amount: true } });
+    if (!routine) { await TelegramService.sendTextMessage(externalId, '❌ Rutin tidak ditemukan.'); return; }
+    await TelegramService.sendTextMessage(externalId, `✏️ Jumlah baru untuk *${routine.title}*?\n_Tulis angka saja, contoh: 350000_`);
+    await prisma.transactionSession.create({ data: {
+      messagingAccountId: account.id, platform: 'TELEGRAM', status: 'PENDING',
+      extractedData: { type: 'ROUTINE_EDIT', routineId, routineTitle: routine.title }, rawPayload: {},
+      expiresAt: new Date(Date.now() + SESSION_TTL),
+    }});
+    return;
+  }
+
+  // ── ROUTINE_EDIT: receive new amount ──────────────────────────────────────
+  if (sessionData?.type === 'ROUTINE_EDIT' && textBody) {
+    const amount = Number(textBody.replace(/[^0-9]/g, ''));
+    if (!amount) { await TelegramService.sendTextMessage(externalId, '❌ Tulis angka saja, contoh: 350000'); return; }
+    await prisma.routineExpense.update({ where: { id: sessionData.routineId }, data: { amount } });
+    await prisma.transactionSession.update({ where: { id: activeSession.id }, data: { status: 'SAVED' } });
+    await TelegramService.sendTextMessage(externalId, `✅ *${sessionData.routineTitle}* diperbarui: Rp ${amount.toLocaleString('id-ID')}`);
+    return;
+  }
+
+  // ── ROUTINE_ADD multi-step ─────────────────────────────────────────────────
+  if (sessionData?.type === 'ROUTINE_ADD') {
+    const FREQ_BTNS = [
+      { id: 'rutin_freq_DAILY',    title: '📆 Harian' },
+      { id: 'rutin_freq_WEEKLY',   title: '🗓️ Mingguan' },
+      { id: 'rutin_freq_MONTHLY',  title: '📅 Bulanan' },
+      { id: 'rutin_freq_ANNUALLY', title: '🗃️ Tahunan' },
+    ];
+
+    if (sessionData.step === 'ASK_TITLE' && textBody) {
+      await prisma.transactionSession.update({ where: { id: activeSession.id }, data: { extractedData: { ...sessionData, step: 'ASK_AMOUNT', title: textBody.trim() } } });
+      await TelegramService.sendTextMessage(externalId, `💰 Berapa jumlah *${textBody.trim()}* setiap periodenya?\n_Tulis angka saja, contoh: 500000_`);
+      return;
+    }
+
+    if (sessionData.step === 'ASK_AMOUNT' && textBody) {
+      const amount = Number(textBody.replace(/[^0-9]/g, ''));
+      if (!amount) { await TelegramService.sendTextMessage(externalId, '❌ Tulis angka saja, contoh: 500000'); return; }
+      await prisma.transactionSession.update({ where: { id: activeSession.id }, data: { extractedData: { ...sessionData, step: 'ASK_FREQUENCY', amount } } });
+      await TelegramService.sendInteractiveButtons(externalId, '🔁 Seberapa sering pengeluaran ini terjadi?', FREQ_BTNS);
+      return;
+    }
+
+    if (sessionData.step === 'ASK_FREQUENCY' && buttonData?.startsWith('rutin_freq_')) {
+      const frequency = buttonData.replace('rutin_freq_', '');
+      const accounts = await prisma.account.findMany({ where: { messagingAccountId: account.id, isActive: true }, select: { id: true, name: true }, orderBy: { createdAt: 'asc' } });
+      if (!accounts.length) { await TelegramService.sendTextMessage(externalId, '❌ Tidak ada rekening aktif.'); return; }
+      await prisma.transactionSession.update({ where: { id: activeSession.id }, data: { extractedData: { ...sessionData, step: 'ASK_ACCOUNT', frequency } } });
+      await TelegramService.sendInteractiveButtons(externalId, '🏦 Dari rekening mana biaya ini dipotong?',
+        accounts.map(a => ({ id: `rutin_acc_${a.id}`, title: a.name }))
+      );
+      return;
+    }
+
+    if (sessionData.step === 'ASK_ACCOUNT' && buttonData?.startsWith('rutin_acc_')) {
+      const accountId = buttonData.replace('rutin_acc_', '');
+      await prisma.routineExpense.create({ data: {
+        messagingAccountId: account.id,
+        accountId,
+        title: sessionData.title,
+        amount: sessionData.amount,
+        frequency: sessionData.frequency,
+        startDate: new Date(),
+        isActive: true,
+      }});
+      await prisma.transactionSession.update({ where: { id: activeSession.id }, data: { status: 'SAVED' } });
+      const FREQ_LABEL: Record<string, string> = { DAILY: 'Harian', WEEKLY: 'Mingguan', MONTHLY: 'Bulanan', ANNUALLY: 'Tahunan' };
+      await TelegramService.sendTextMessage(externalId,
+        `✅ *${sessionData.title}* ditambahkan!\n` +
+        `💰 Rp ${Number(sessionData.amount).toLocaleString('id-ID')} — ${FREQ_LABEL[sessionData.frequency]}\n` +
+        `📅 Mulai: Hari ini`
+      );
+      return;
+    }
+  }
+
+  // ── Tambah Rekening ───────────────────────────────────────────────────────
   if (buttonData === 'menu_rekening_tambah') {
     await TelegramService.sendTextMessage(externalId, '➕ *Tambah Rekening Baru*\n\n📝 Apa nama rekeningnya?\n_Contoh: BCA, GoPay, Tunai_');
     await prisma.transactionSession.create({ data: {
