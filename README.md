@@ -79,3 +79,5 @@ Returns an aggregated array spendingByCategory with pre-computed percentages for
 Groups expenses efficiently into cashFlowByWeek arrays.
 5. PDF Reporting APIs (/v1/reports/data)
 Produces a uniquely crafted payload that groups all expenses, logs, metadata, and status snapshots into an isolated JSON payload specific to a given ?month=X&year=Y query. This is optimized for pushing into jsPDF renderers.
+
+## The end
