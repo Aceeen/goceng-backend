@@ -82,7 +82,22 @@ const processAsyncPayload = async (payload: any) => {
     }
 
     // ── Ambil kategori untuk NLP ──────────────────────────────────────────
-    const allCategories = await prisma.category.findMany({ select: { name: true }, orderBy: { name: 'asc' } });
+    const allCategories = await prisma.category.findMany({
+      where: {
+        OR: [
+          { isSystem: true },
+          {
+            transactions: {
+              some: {
+                messagingAccountId: messagingAccount.id
+              }
+            }
+          }
+        ]
+      },
+      select: { name: true },
+      orderBy: { name: 'asc' }
+    });
     const categoryNames = allCategories.map((c) => c.name);
 
     // ── ROUTING: Tombol interaktif ────────────────────────────────────────

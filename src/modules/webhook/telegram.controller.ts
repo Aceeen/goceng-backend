@@ -136,7 +136,22 @@ const processTelegramPayload = async (payload: any) => {
     }
 
     // ── New message ─────────────────────────────────────────────────────────
-    const allCategories = await prisma.category.findMany({ select: { name: true }, orderBy: { name: 'asc' } });
+    const allCategories = await prisma.category.findMany({
+      where: {
+        OR: [
+          { isSystem: true },
+          {
+            transactions: {
+              some: {
+                messagingAccountId: messagingAccount.id
+              }
+            }
+          }
+        ]
+      },
+      select: { name: true },
+      orderBy: { name: 'asc' }
+    });
     const categoryNames = allCategories.map((c) => c.name);
 
     // Handle slash commands
@@ -228,7 +243,21 @@ const handleMenuRouter = async (
   }
 
   if (buttonData === 'menu_budget') {
-    const categories = await prisma.category.findMany({ orderBy: { name: 'asc' } });
+    const categories = await prisma.category.findMany({
+      where: {
+        OR: [
+          { isSystem: true },
+          {
+            transactions: {
+              some: {
+                messagingAccountId: account.id
+              }
+            }
+          }
+        ]
+      },
+      orderBy: { name: 'asc' }
+    });
     if (!categories.length) {
       await TelegramService.sendTextMessage(externalId, '❌ Belum ada kategori.');
       return;
