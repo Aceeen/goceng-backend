@@ -215,9 +215,71 @@ if (spreadsheetId) {
   });
 }
 
+  let budgetWarning = null;
+  if (transaction.type === 'EXPENSE' && transaction.categoryId) {
+    try {
+      const txDate = transaction.transactionDate;
+      const month = txDate.getMonth() + 1;
+      const year = txDate.getFullYear();
+
+      const budget = await prisma.budget.findUnique({
+        where: {
+          messagingAccountId_categoryId_month_year: {
+            messagingAccountId,
+            categoryId: transaction.categoryId,
+            month,
+            year,
+          },
+        },
+      });
+
+      if (budget) {
+        const startOfMonth = new Date(txDate.getFullYear(), txDate.getMonth(), 1);
+        const endOfMonth = new Date(txDate.getFullYear(), txDate.getMonth() + 1, 0, 23, 59, 59, 999);
+
+        const totalExpense = await prisma.transaction.aggregate({
+          where: {
+            messagingAccountId,
+            categoryId: transaction.categoryId,
+            type: 'EXPENSE',
+            isConfirmed: true,
+            deletedAt: null,
+            transactionDate: {
+              gte: startOfMonth,
+              lte: endOfMonth,
+            },
+          },
+          _sum: {
+            amount: true,
+          },
+        });
+
+        const currentSpent = Number(totalExpense._sum.amount ?? 0);
+        const limit = Number(budget.limitAmount);
+
+        if (currentSpent >= limit) {
+          const cat = await prisma.category.findUnique({
+            where: { id: transaction.categoryId },
+            select: { name: true },
+          });
+
+          budgetWarning = {
+            categoryName: cat?.name ?? 'Kategori',
+            limitAmount: limit,
+            currentSpent,
+            isExceeded: currentSpent > limit,
+          };
+        }
+      }
+    } catch (budgetErr) {
+      console.error('[Budget Warning] Failed to check budget limit:', budgetErr);
+    }
+  }
+
   return {
     transaction,
     account: updatedAccount,
+    budgetWarning,
   };
 }
 

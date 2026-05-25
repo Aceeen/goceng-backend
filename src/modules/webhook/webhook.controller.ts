@@ -236,7 +236,7 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
         }
       }
 
-      const { account } = await saveConfirmedTransaction(messagingAccountId, data, imageUrl);
+      const { account, budgetWarning } = await saveConfirmedTransaction(messagingAccountId, data, imageUrl);
 
       await updateSessionStatus(session.id, 'SAVED');
 
@@ -251,17 +251,22 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
           `• 💵 Total asli: ${data.originalCurrency} ${data.originalAmount}\n`
         : '';
 
-      await WhatsAppService.sendTextMessage(
-        fromNumber,
-        `✅ *Transaksi berhasil dicatat!*\n\n` +
+      let msg = `✅ *Transaksi berhasil dicatat!*\n\n` +
         `📋 *Ringkasan:*\n` +
         `• 🏪 Merchant: ${merchant}\n` +
         `• 💰 Total: Rp ${amount}\n` +
         `${foreignInfo}` +
         `• 📁 Kategori: ${category}\n` +
         `• 🏦 Rekening: ${account?.name ?? '-'}\n\n` +
-        `💰 *Sisa saldo ${account?.name ?? 'rekening'}: Rp ${saldo}*`
-      );
+        `💰 *Sisa saldo ${account?.name ?? 'rekening'}: Rp ${saldo}*`;
+
+      if (budgetWarning) {
+        const spent = budgetWarning.currentSpent.toLocaleString('id-ID');
+        const lim = budgetWarning.limitAmount.toLocaleString('id-ID');
+        msg += `\n\n⚠️ *PERINGATAN BUDGET bulanan ${budgetWarning.categoryName}*!\nPengeluaran telah mencapai *Rp ${spent}* dari limit *Rp ${lim}*!`;
+      }
+
+      await WhatsAppService.sendTextMessage(fromNumber, msg);
     } catch (err) {
       console.error('Gagal simpan transaksi:', err);
       await updateSessionStatus(session.id, 'FAILED');

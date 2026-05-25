@@ -4,6 +4,7 @@ import { TelegramService } from './telegram.service';
 import { prisma } from '../../config/prisma';
 import { DriveService } from '../sheets/drive.service';
 import { SheetsService } from '../sheets/sheets.service';
+import { BudgetService } from '../budget/budget.service';
 
 // AI Module
 import { extractFromImage, extractFromText, applyUserCorrection } from '../ai/ai.service';
@@ -113,7 +114,13 @@ const processTelegramPayload = async (payload: any) => {
     // ── Check for active menu sessions (multi-step flows) ───────────────────
     const menuSessionData = menuSession?.extractedData as any;
 
-    if (menuSession && (menuSessionData?.type === 'ADD_ACCOUNT' || menuSessionData?.type === 'MENU_UBAH_SALDO' || menuSessionData?.type === 'ROUTINE_ADD' || menuSessionData?.type === 'ROUTINE_EDIT')) {
+    if (menuSession && (
+      menuSessionData?.type === 'ADD_ACCOUNT' ||
+      menuSessionData?.type === 'MENU_UBAH_SALDO' ||
+      menuSessionData?.type === 'ROUTINE_ADD' ||
+      menuSessionData?.type === 'ROUTINE_EDIT' ||
+      menuSessionData?.type === 'BUDGET_SET'
+    )) {
       await handleMenuRouter(externalId, messagingAccount, null, textBody, menuSession);
       return;
     }
@@ -160,6 +167,7 @@ const sendMainMenu = async (externalId: string, preamble?: string) => {
     { id: 'menu_transaksi', title: '💳 Tambah Transaksi' },
     { id: 'menu_rekening',  title: '💼 Kelola Rekening' },
     { id: 'menu_rutin',     title: '📅 Pengeluaran Rutin' },
+    { id: 'menu_budget',    title: '📊 Atur Budget' },
     { id: 'menu_cetak',     title: '🖨️ Cetak Laporan (SPS)' },
   ]);
 };
@@ -216,6 +224,20 @@ const handleMenuRouter = async (
       months.push({ id: `cetak_${d.getMonth() + 1}_${d.getFullYear()}`, title: `${MONTHS_ID[d.getMonth()]} ${d.getFullYear()}` });
     }
     await TelegramService.sendInteractiveButtons(externalId, '🖨️ *Cetak Laporan SPS*\n\nPilih bulan:', months);
+    return;
+  }
+
+  if (buttonData === 'menu_budget') {
+    const categories = await prisma.category.findMany({ orderBy: { name: 'asc' } });
+    if (!categories.length) {
+      await TelegramService.sendTextMessage(externalId, '❌ Belum ada kategori.');
+      return;
+    }
+    await TelegramService.sendInteractiveButtons(
+      externalId,
+      '📊 *Atur Budget Bulanan*\n\nPilih kategori yang ingin diatur limit budgetnya:',
+      categories.map(c => ({ id: `budget_cat_${c.id}`, title: c.name }))
+    );
     return;
   }
 
@@ -447,6 +469,53 @@ const handleMenuRouter = async (
     return;
   }
 
+  // ── BUDGET: selected category -> ask amount ──────────────────────────────
+  if (buttonData?.startsWith('budget_cat_')) {
+    const categoryId = buttonData.replace('budget_cat_', '');
+    const cat = await prisma.category.findUnique({ where: { id: categoryId }, select: { name: true } });
+    if (!cat) { await TelegramService.sendTextMessage(externalId, '❌ Kategori tidak ditemukan.'); return; }
+
+    await TelegramService.sendTextMessage(
+      externalId,
+      `📊 Berapa limit budget bulanan untuk kategori *${cat.name}*?\n_Tulis angka saja, contoh: 1000000_`
+    );
+
+    await prisma.transactionSession.create({ data: {
+      messagingAccountId: account.id, platform: 'TELEGRAM', status: 'PENDING',
+      extractedData: { type: 'BUDGET_SET', categoryId, categoryName: cat.name }, rawPayload: {},
+      expiresAt: new Date(Date.now() + SESSION_TTL),
+    }});
+    return;
+  }
+
+  // ── BUDGET_SET: receive limit amount ─────────────────────────────────────
+  if (sessionData?.type === 'BUDGET_SET' && textBody) {
+    const limit = Number(textBody.replace(/[^0-9]/g, ''));
+    if (isNaN(limit) || limit <= 0) {
+      await TelegramService.sendTextMessage(externalId, '❌ Tulis angka saja, contoh: 1000000');
+      return;
+    }
+
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+
+    await BudgetService.upsertBudget(account.id, {
+      categoryId: sessionData.categoryId,
+      limitAmount: limit,
+      month,
+      year
+    });
+
+    await prisma.transactionSession.update({ where: { id: activeSession.id }, data: { status: 'SAVED' } });
+
+    await TelegramService.sendTextMessage(
+      externalId,
+      `✅ *Budget Diatur!*\n📁 Kategori: *${sessionData.categoryName}*\n💰 Limit: *Rp ${limit.toLocaleString('id-ID')}*\n📅 Periode: Bulan ini`
+    );
+    return;
+  }
+
   // Fallback
   await sendMainMenu(externalId);
 };
@@ -590,11 +659,19 @@ const handleButtonReply = async (externalId: string, messagingAccountId: string,
         }
       }
 
-      const { account } = await saveConfirmedTransaction(messagingAccountId, data, imageUrl);
+      const { account, budgetWarning } = await saveConfirmedTransaction(messagingAccountId, data, imageUrl);
       await updateSessionStatus(session.id, 'SAVED');
       const amount = Number(data.totalAmount ?? data.amount ?? 0).toLocaleString('id-ID');
       const saldo = Number(account?.currentBalance ?? 0).toLocaleString('id-ID');
-      await TelegramService.sendTextMessage(externalId, `✅ *Transaksi dicatat!*\n💰 Rp ${amount}\n💳 Sisa saldo ${account?.name ?? ''}: Rp ${saldo}`);
+      
+      let msg = `✅ *Transaksi dicatat!*\n💰 Rp ${amount}\n💳 Sisa saldo ${account?.name ?? ''}: Rp ${saldo}`;
+      if (budgetWarning) {
+        const spent = budgetWarning.currentSpent.toLocaleString('id-ID');
+        const lim = budgetWarning.limitAmount.toLocaleString('id-ID');
+        msg += `\n\n⚠️ *PERINGATAN BUDGET bulanan ${budgetWarning.categoryName}*!\nPengeluaran telah mencapai *Rp ${spent}* dari limit *Rp ${lim}*!`;
+      }
+      
+      await TelegramService.sendTextMessage(externalId, msg);
     } catch (err) {
       await updateSessionStatus(session.id, 'FAILED');
       await TelegramService.sendTextMessage(externalId, '❌ Gagal menyimpan. Coba lagi ya.');
