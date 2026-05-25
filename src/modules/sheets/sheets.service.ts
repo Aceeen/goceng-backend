@@ -139,6 +139,80 @@ export class SheetsService {
   }
 
   /**
+   * Syncs all budgets of a messaging account to the user's spreadsheet.
+   */
+  static async syncBudgetsToSheet(userId: string, spreadsheetId: string, messagingAccountId: string) {
+    await this.authenticateUser(userId);
+
+    const budgets = await prisma.budget.findMany({
+      where: { messagingAccountId },
+      include: { category: true },
+      orderBy: [
+        { year: 'desc' },
+        { month: 'desc' },
+        { category: { name: 'asc' } }
+      ],
+    });
+
+    try {
+      let sheetName = 'BUDGETS';
+      try {
+        await sheetsAPI.spreadsheets.values.clear({
+          spreadsheetId,
+          range: `${sheetName}!A2:E100`,
+        });
+      } catch (err) {
+        sheetName = 'Budgets';
+        await sheetsAPI.spreadsheets.values.clear({
+          spreadsheetId,
+          range: `${sheetName}!A2:E100`,
+        });
+      }
+
+      if (budgets.length > 0) {
+        const values = budgets.map((b) => [
+          b.category?.name || '',
+          b.month,
+          b.year,
+          Number(b.limitAmount),
+          b.notes || '',
+        ]);
+
+        await sheetsAPI.spreadsheets.values.update({
+          spreadsheetId,
+          range: `${sheetName}!A2:E${budgets.length + 1}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values,
+          },
+        });
+      }
+      console.log(`✅ Budgets synced to Sheets for user ${userId}.`);
+    } catch (error) {
+      console.error(`❌ Failed to sync budgets to Sheets for user ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Helper to trigger async budget sync in background
+   */
+  static triggerBudgetSync(messagingAccountId: string) {
+    setImmediate(async () => {
+      try {
+        const accountMeta = await prisma.messagingAccount.findUnique({
+          where: { id: messagingAccountId },
+          select: { spreadsheetId: true, userId: true },
+        });
+        if (accountMeta?.spreadsheetId && accountMeta?.userId) {
+          await this.syncBudgetsToSheet(accountMeta.userId, accountMeta.spreadsheetId, messagingAccountId);
+        }
+      } catch (err) {
+        console.error('[Sheets] triggerBudgetSync error:', err);
+      }
+    });
+  }
+
+  /**
    * Copy the Master Spreadsheet Template to the user's Drive.
    */
   static async setupUserSpreadsheet(userId: string): Promise<string> {

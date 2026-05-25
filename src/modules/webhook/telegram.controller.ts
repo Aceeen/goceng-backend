@@ -172,6 +172,7 @@ const processTelegramPayload = async (payload: any) => {
     // Handle slash commands
     if (textBody?.startsWith('/')) {
       SheetsService.triggerAccountSync(messagingAccount.id);
+      SheetsService.triggerBudgetSync(messagingAccount.id);
       await sendMainMenu(externalId, USAGE_INSTRUCTIONS);
       return;
     }

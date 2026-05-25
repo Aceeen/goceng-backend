@@ -1,4 +1,5 @@
 import { prisma } from '../../config/prisma';
+import { SheetsService } from '../sheets/sheets.service';
 
 export class BudgetService {
   static async getBudgets(messagingAccountId: string) {
@@ -58,7 +59,7 @@ export class BudgetService {
   }
 
   static async upsertBudget(messagingAccountId: string, data: { categoryId: string; limitAmount: number; month: number; year: number; notes?: string }) {
-    return prisma.budget.upsert({
+    const budget = await prisma.budget.upsert({
       where: {
         messagingAccountId_categoryId_month_year: {
           messagingAccountId,
@@ -80,6 +81,10 @@ export class BudgetService {
         notes: data.notes
       }
     });
+
+    SheetsService.triggerBudgetSync(messagingAccountId);
+
+    return budget;
   }
 
   static async deleteBudget(id: string, messagingAccountId: string) {
@@ -87,6 +92,9 @@ export class BudgetService {
       where: { id, messagingAccountId }
     });
     if (result.count === 0) throw new Error("Budget not found");
+
+    SheetsService.triggerBudgetSync(messagingAccountId);
+
     return result;
   }
 }
