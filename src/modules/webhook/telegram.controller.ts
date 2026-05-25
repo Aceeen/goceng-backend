@@ -59,6 +59,12 @@ const processTelegramPayload = async (payload: any) => {
       else if (payload.message.photo) {
         const photos = payload.message.photo;
         mediaId = photos[photos.length - 1].file_id;
+      } else if (payload.message.document) {
+        const doc = payload.message.document;
+        const mimeType = doc.mime_type || '';
+        if (mimeType.startsWith('image/') || mimeType === 'application/pdf') {
+          mediaId = doc.file_id;
+        }
       }
     }
 
@@ -85,9 +91,15 @@ const processTelegramPayload = async (payload: any) => {
       return;
     }
 
+    // Load active session early to support multi-step button routing
+    const menuSession = await prisma.transactionSession.findFirst({
+      where: { messagingAccountId: messagingAccount.id, status: 'PENDING', expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+
     // ── Menu button routing ──────────────────────────────────────────────────
     if (buttonData && !buttonData.startsWith('btn_')) {
-      await handleMenuRouter(externalId, messagingAccount, buttonData, textBody);
+      await handleMenuRouter(externalId, messagingAccount, buttonData, textBody, menuSession || undefined);
       return;
     }
 
@@ -98,10 +110,6 @@ const processTelegramPayload = async (payload: any) => {
     }
 
     // ── Check for active menu sessions (multi-step flows) ───────────────────
-    const menuSession = await prisma.transactionSession.findFirst({
-      where: { messagingAccountId: messagingAccount.id, status: 'PENDING', expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
-    });
     const menuSessionData = menuSession?.extractedData as any;
 
     if (menuSession && (menuSessionData?.type === 'ADD_ACCOUNT' || menuSessionData?.type === 'MENU_UBAH_SALDO' || menuSessionData?.type === 'ROUTINE_ADD' || menuSessionData?.type === 'ROUTINE_EDIT')) {

@@ -84,7 +84,29 @@ export class TelegramService {
       if (!bufferRes.ok) return null;
 
       const arrayBuffer = await bufferRes.arrayBuffer();
-      const mimeType = bufferRes.headers.get('content-type') || 'image/jpeg';
+      
+      const filePath = fileData.result.file_path || '';
+      const ext = filePath.split('.').pop()?.toLowerCase();
+      let mimeType = 'image/jpeg';
+
+      if (ext === 'png') {
+        mimeType = 'image/png';
+      } else if (ext === 'webp') {
+        mimeType = 'image/webp';
+      } else if (ext === 'pdf') {
+        mimeType = 'application/pdf';
+      } else if (ext === 'heic') {
+        mimeType = 'image/heic';
+      } else if (ext === 'heif') {
+        mimeType = 'image/heif';
+      } else if (ext === 'jpg' || ext === 'jpeg') {
+        mimeType = 'image/jpeg';
+      } else {
+        const headerMime = bufferRes.headers.get('content-type');
+        if (headerMime && headerMime !== 'application/octet-stream') {
+          mimeType = headerMime;
+        }
+      }
 
       return { buffer: Buffer.from(arrayBuffer), mimeType };
     } catch (error) {
