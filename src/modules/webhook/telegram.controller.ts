@@ -134,7 +134,8 @@ const processTelegramPayload = async (payload: any) => {
       menuSessionData?.type === 'MENU_UBAH_SALDO' ||
       menuSessionData?.type === 'ROUTINE_ADD' ||
       menuSessionData?.type === 'ROUTINE_EDIT' ||
-      menuSessionData?.type === 'BUDGET_SET'
+      menuSessionData?.type === 'BUDGET_SET' ||
+      menuSessionData?.type === 'BUDGET_EDIT'
     )) {
       await handleMenuRouter(externalId, messagingAccount, null, textBody, menuSession);
       return;
@@ -259,7 +260,38 @@ const handleMenuRouter = async (
   }
 
   if (buttonData === 'menu_budget') {
-    const categories = await prisma.category.findMany({
+    const today = new Date();
+    const currentMonth = today.getMonth() + 1;
+    const currentYear = today.getFullYear();
+
+    const budgets = await prisma.budget.findMany({
+      where: { messagingAccountId: account.id, month: currentMonth, year: currentYear },
+      include: { category: true },
+      orderBy: { category: { name: 'asc' } }
+    });
+
+    const buttons = budgets.map(b => ({
+      id: `budget_edit_${b.id}`,
+      title: `${b.category.name}: Rp ${Number(b.limitAmount).toLocaleString('id-ID')}`
+    }));
+
+    buttons.push({ id: 'menu_budget_tambah', title: '➕ Tambah Budget Baru' });
+
+    await TelegramService.sendInteractiveButtons(
+      externalId,
+      `📊 *Atur Budget Bulanan (${MONTHS_ID[currentMonth - 1]} ${currentYear})*\n\nPilih budget di bawah untuk mengubah limit/menghapus, atau buat budget baru:`,
+      buttons
+    );
+    return;
+  }
+
+  if (buttonData === 'menu_budget_tambah') {
+    const today = new Date();
+    const currentMonth = today.getMonth() + 1;
+    const currentYear = today.getFullYear();
+
+    // Get all categories scoped for the user
+    const allCategories = await prisma.category.findMany({
       where: {
         OR: [
           { isSystem: true },
@@ -274,15 +306,91 @@ const handleMenuRouter = async (
       },
       orderBy: { name: 'asc' }
     });
-    if (!categories.length) {
-      await TelegramService.sendTextMessage(externalId, '❌ Belum ada kategori.');
+
+    // Get categories that already have a budget
+    const existingBudgets = await prisma.budget.findMany({
+      where: { messagingAccountId: account.id, month: currentMonth, year: currentYear },
+      select: { categoryId: true }
+    });
+    const existingCatIds = new Set(existingBudgets.map(eb => eb.categoryId));
+
+    // Filter out categories that already have a budget
+    const availableCategories = allCategories.filter(c => !existingCatIds.has(c.id));
+
+    if (!availableCategories.length) {
+      await TelegramService.sendTextMessage(externalId, '❌ Semua kategori sudah diatur budgetnya untuk bulan ini.');
       return;
     }
+
     await TelegramService.sendInteractiveButtons(
       externalId,
-      '📊 *Atur Budget Bulanan*\n\nPilih kategori yang ingin diatur limit budgetnya:',
-      categories.map(c => ({ id: `budget_cat_${c.id}`, title: c.name }))
+      '📊 *Pilih Kategori untuk Budget Baru*:\n\nPilih kategori yang ingin diatur limit budgetnya:',
+      availableCategories.map(c => ({ id: `budget_cat_${c.id}`, title: c.name }))
     );
+    return;
+  }
+
+  if (buttonData?.startsWith('budget_edit_')) {
+    const budgetId = buttonData.replace('budget_edit_', '');
+    const budget = await prisma.budget.findUnique({
+      where: { id: budgetId },
+      include: { category: true }
+    });
+    if (!budget) {
+      await TelegramService.sendTextMessage(externalId, '❌ Budget tidak ditemukan.');
+      return;
+    }
+
+    const buttons = [
+      { id: `budget_change_limit_${budget.id}`, title: '✏️ Ubah Limit' },
+      { id: `budget_delete_${budget.id}`, title: '🗑️ Hapus Budget' },
+      { id: 'menu_budget', title: '⬅️ Kembali' }
+    ];
+
+    await TelegramService.sendInteractiveButtons(
+      externalId,
+      `📊 *Detail Budget: ${budget.category.name}*\n\n` +
+      `• Limit Bulanan: *Rp ${Number(budget.limitAmount).toLocaleString('id-ID')}*\n` +
+      `• Bulan/Tahun: *${MONTHS_ID[budget.month - 1]} ${budget.year}*\n` +
+      `• Catatan: _${budget.notes || '-'}_`,
+      buttons
+    );
+    return;
+  }
+
+  if (buttonData?.startsWith('budget_delete_')) {
+    const budgetId = buttonData.replace('budget_delete_', '');
+    try {
+      await BudgetService.deleteBudget(budgetId, account.id);
+      await TelegramService.sendTextMessage(externalId, '✅ Budget berhasil dihapus!');
+      await handleMenuRouter(externalId, account, 'menu_budget', null);
+    } catch (err) {
+      await TelegramService.sendTextMessage(externalId, '❌ Gagal menghapus budget.');
+    }
+    return;
+  }
+
+  if (buttonData?.startsWith('budget_change_limit_')) {
+    const budgetId = buttonData.replace('budget_change_limit_', '');
+    const budget = await prisma.budget.findUnique({
+      where: { id: budgetId },
+      include: { category: true }
+    });
+    if (!budget) {
+      await TelegramService.sendTextMessage(externalId, '❌ Budget tidak ditemukan.');
+      return;
+    }
+
+    await TelegramService.sendTextMessage(
+      externalId,
+      `📊 Berapa limit budget baru untuk kategori *${budget.category.name}*?\n_Tulis angka saja, contoh: 1500000_`
+    );
+
+    await prisma.transactionSession.create({ data: {
+      messagingAccountId: account.id, platform: 'TELEGRAM', status: 'PENDING',
+      extractedData: { type: 'BUDGET_EDIT', budgetId, categoryId: budget.categoryId, categoryName: budget.category.name, month: budget.month, year: budget.year }, rawPayload: {},
+      expiresAt: new Date(Date.now() + SESSION_TTL),
+    }});
     return;
   }
 
@@ -533,17 +641,16 @@ const handleMenuRouter = async (
     return;
   }
 
-  // ── BUDGET_SET: receive limit amount ─────────────────────────────────────
-  if (sessionData?.type === 'BUDGET_SET' && textBody) {
+  // ── BUDGET_SET / BUDGET_EDIT: receive limit amount ───────────────────────
+  if ((sessionData?.type === 'BUDGET_SET' || sessionData?.type === 'BUDGET_EDIT') && textBody) {
     const limit = Number(textBody.replace(/[^0-9]/g, ''));
     if (isNaN(limit) || limit <= 0) {
       await TelegramService.sendTextMessage(externalId, '❌ Tulis angka saja, contoh: 1000000');
       return;
     }
 
-    const now = new Date();
-    const month = now.getMonth() + 1;
-    const year = now.getFullYear();
+    const month = sessionData.month ?? (new Date().getMonth() + 1);
+    const year = sessionData.year ?? new Date().getFullYear();
 
     await BudgetService.upsertBudget(account.id, {
       categoryId: sessionData.categoryId,
@@ -556,7 +663,7 @@ const handleMenuRouter = async (
 
     await TelegramService.sendTextMessage(
       externalId,
-      `✅ *Budget Diatur!*\n📁 Kategori: *${sessionData.categoryName}*\n💰 Limit: *Rp ${limit.toLocaleString('id-ID')}*\n📅 Periode: Bulan ini`
+      `✅ *Budget Berhasil ${sessionData.type === 'BUDGET_EDIT' ? 'Diperbarui' : 'Diatur'}!*\n📁 Kategori: *${sessionData.categoryName}*\n💰 Limit Baru: *Rp ${limit.toLocaleString('id-ID')}*\n📅 Periode: ${MONTHS_ID[month - 1]} ${year}`
     );
     return;
   }
