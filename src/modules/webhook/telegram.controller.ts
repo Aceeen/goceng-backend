@@ -563,7 +563,34 @@ const handleButtonReply = async (externalId: string, messagingAccountId: string,
   if (buttonId === BTN_CONFIRM) {
     try {
       const data = session.extractedData as any;
-      const { account } = await saveConfirmedTransaction(messagingAccountId, data);
+      const rawPayload = session.rawPayload as any;
+      const mediaId = rawPayload?.mediaId;
+      let imageUrl: string | undefined;
+
+      if (mediaId) {
+        const mediaData = await TelegramService.downloadMedia(mediaId);
+        if (mediaData) {
+          const accountMeta = await prisma.messagingAccount.findUnique({
+            where: { id: messagingAccountId },
+            select: { userId: true },
+          });
+          if (accountMeta?.userId) {
+            const fileName = `receipt_${Date.now()}`;
+            const uploadedUrl = await DriveService.uploadReceipt(
+              accountMeta.userId,
+              messagingAccountId,
+              mediaData.buffer,
+              mediaData.mimeType,
+              fileName
+            );
+            if (uploadedUrl) {
+              imageUrl = uploadedUrl;
+            }
+          }
+        }
+      }
+
+      const { account } = await saveConfirmedTransaction(messagingAccountId, data, imageUrl);
       await updateSessionStatus(session.id, 'SAVED');
       const amount = Number(data.totalAmount ?? data.amount ?? 0).toLocaleString('id-ID');
       const saldo = Number(account?.currentBalance ?? 0).toLocaleString('id-ID');

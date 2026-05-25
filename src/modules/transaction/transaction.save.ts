@@ -32,63 +32,72 @@ function getTransactionSource(data: ExtractedData): 'WHATSAPP_OCR' | 'WHATSAPP_T
   return isNLPResult(data) ? 'WHATSAPP_TEXT' : 'WHATSAPP_OCR';
 }
 
-export async function saveConfirmedTransaction(messagingAccountId: string, data: ExtractedData) {
+export async function saveConfirmedTransaction(
+  messagingAccountId: string,
+  data: ExtractedData,
+  imageUrl?: string | null
+) {
   // OCR blur tidak boleh disimpan karena data transaksi tidak lengkap
   if (!isNLPResult(data) && isOCRBlur(data)) {
     throw new Error('OCR_RESULT_BLUR_CANNOT_SAVE');
   }
 
-const account = data.accountId
-  ? await prisma.account.findFirst({
-      where: {
-        id: data.accountId,
-        messagingAccountId,
-        isActive: true,
-      },
-    })
-  : await prisma.account.findFirst({
-      where: {
-        messagingAccountId,
-        isActive: true,
-      },
-      orderBy: {
-        createdAt: 'asc',
-      },
-    });
+  const account = data.accountId
+    ? await prisma.account.findFirst({
+        where: {
+          id: data.accountId,
+          messagingAccountId,
+          isActive: true,
+        },
+      })
+    : await prisma.account.findFirst({
+        where: {
+          messagingAccountId,
+          isActive: true,
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      });
 
-if (!account) {
-  throw new Error('USER_HAS_NO_ACCOUNT');
-}
+  if (!account) {
+    throw new Error('USER_HAS_NO_ACCOUNT');
+  }
 
-const accountId = account.id;
-const normalizedCategory =
-  (data as any).suggestedCategory ??
-  (data as any).category ??
-  (data as any).kategori ??
-  (data as any).categoryName;
-
-let category = null;
-let transactionType: 'INCOME' | 'EXPENSE' = data.type ?? 'EXPENSE';
-if (data.suggestedCategory) {
-  category = await prisma.category.findFirst({
-    where: {
-      name: {
-        equals: data.suggestedCategory,
-        mode: 'insensitive'
-      }
-    },
+  const accountMeta = await prisma.messagingAccount.findUnique({
+    where: { id: messagingAccountId },
+    select: { spreadsheetId: true, userId: true, platform: true },
   });
 
-  // 🔥 kalau belum ada → bikin baru
-  if (!category) {
-    category = await prisma.category.create({
-      data: {
-        name: data.suggestedCategory,
-        type: transactionType
+  const accountId = account.id;
+  const normalizedCategory =
+    (data as any).suggestedCategory ??
+    (data as any).category ??
+    (data as any).kategori ??
+    (data as any).categoryName;
+
+  let category = null;
+  let transactionType: 'INCOME' | 'EXPENSE' = data.type ?? 'EXPENSE';
+  if (data.suggestedCategory) {
+    category = await prisma.category.findFirst({
+      where: {
+        name: {
+          equals: data.suggestedCategory,
+          mode: 'insensitive'
+        }
       },
     });
+
+    // 🔥 kalau belum ada → bikin baru
+    if (!category) {
+      category = await prisma.category.create({
+        data: {
+          name: data.suggestedCategory,
+          type: transactionType
+        },
+      });
+    }
   }
-}
 
   let amount = 0;
   
@@ -96,7 +105,14 @@ if (data.suggestedCategory) {
   let merchantName: string | null = null;
   let transactionDate: Date = new Date();
   let items: OCRTransactionItem[] = [];
-  let source: 'WHATSAPP_OCR' | 'WHATSAPP_TEXT' = getTransactionSource(data);
+
+  const platform = accountMeta?.platform ?? 'WHATSAPP';
+  let source: 'WHATSAPP_OCR' | 'WHATSAPP_TEXT' | 'TELEGRAM_OCR' | 'TELEGRAM_TEXT';
+  if (platform === 'TELEGRAM') {
+    source = isNLPResult(data) ? 'TELEGRAM_TEXT' : 'TELEGRAM_OCR';
+  } else {
+    source = isNLPResult(data) ? 'WHATSAPP_TEXT' : 'WHATSAPP_OCR';
+  }
 
   if (isNLPResult(data)) {
     amount = data.amount ?? 0;
@@ -126,6 +142,7 @@ if (data.suggestedCategory) {
         merchantName,
         transactionDate,
         source,
+        imageUrl: imageUrl || null,
         isConfirmed: true,
         isSynced: false,
         items: items.length
@@ -159,12 +176,7 @@ if (data.suggestedCategory) {
     },
   });
 
-  const accountMeta = await prisma.messagingAccount.findUnique({
-    where: { id: messagingAccountId },
-    select: { spreadsheetId: true, userId: true },
-  });
-
-const spreadsheetId = accountMeta?.spreadsheetId;
+  const spreadsheetId = accountMeta?.spreadsheetId;
 
 if (spreadsheetId) {
   setImmediate(async () => {
