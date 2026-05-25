@@ -20,6 +20,21 @@ const BTN_CANCEL  = 'btn_cancel';
 
 const MONTHS_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 
+const USAGE_INSTRUCTIONS =
+  `👋 *GOCENG — Asisten Keuanganmu* 🤖📊\n\n` +
+  `Berikut cara mencatat transaksi secara otomatis:\n\n` +
+  `💸 *Catat Pengeluaran*\n` +
+  `Kirim pesan teks biasa. Contoh:\n` +
+  `• _"Makan siang 25rb"_\n` +
+  `• _"Beli kopi 30.000 di Starbucks"_\n\n` +
+  `💰 *Catat Pemasukan (Income)*\n` +
+  `Anda juga bisa mencatat pemasukan! Contoh:\n` +
+  `• _"Gaji masuk 5.000.000"_\n` +
+  `• _"Freelance 1.5jt"_\n\n` +
+  `📸 *Gunakan Foto Struk*\n` +
+  `Cukup kirim foto struk transaksi Anda langsung di sini.\n\n` +
+  `Gunakan menu di bawah untuk mengelola rekening, budget, pengeluaran rutin, atau mencetak laporan. 👇`;
+
 const OB_ACCOUNT_TYPES = [
   { id: 'ob_BANK',        title: '🏦 Bank' },
   { id: 'ob_E_WALLET',    title: '📱 E-Wallet' },
@@ -157,7 +172,7 @@ const processTelegramPayload = async (payload: any) => {
     // Handle slash commands
     if (textBody?.startsWith('/')) {
       SheetsService.triggerAccountSync(messagingAccount.id);
-      await sendMainMenu(externalId);
+      await sendMainMenu(externalId, USAGE_INSTRUCTIONS);
       return;
     }
 
@@ -166,7 +181,7 @@ const processTelegramPayload = async (payload: any) => {
     } else if (mediaId) {
       await handleImageMessage(externalId, messagingAccount.id, mediaId, messageId!);
     } else {
-      await sendMainMenu(externalId);
+      await sendMainMenu(externalId, USAGE_INSTRUCTIONS);
     }
   } catch (error) {
     console.error('❌ processTelegramPayload error:', error);
@@ -592,7 +607,12 @@ const handleOnboarding = async (externalId: string, messagingAccountId: string, 
     await prisma.messagingAccount.update({ where: { id: messagingAccountId }, data: { isOnboarded: true } });
     await prisma.transactionSession.update({ where: { id: session.id }, data: { status: 'SAVED' } });
     await TelegramService.sendTextMessage(externalId,
-      `✅ *Rekening ${sd.name} berhasil dibuat!*\n💰 Saldo awal: Rp ${balance.toLocaleString('id-ID')}\n\n🎉 GOCENG siap! Kamu bisa:\n• Kirim pesan _"Makan siang 25rb"_\n• Foto struk belanja 📸`
+      `✅ *Rekening ${sd.name} berhasil dibuat!*\n💰 Saldo awal: Rp ${balance.toLocaleString('id-ID')}\n\n` +
+      `🎉 *GOCENG siap digunakan!*\n\n` +
+      `Berikut cara cepat mencatat transaksi:\n` +
+      `💸 *Catat Pengeluaran*: Kirim pesan teks seperti _"Makan siang 25rb"_ atau _"Beli kopi 30000"_\n` +
+      `💰 *Catat Pemasukan (Income)*: Kirim pesan teks seperti _"Gaji masuk 5jt"_ atau _"Freelance 1.5jt"_\n` +
+      `📸 *Gunakan Foto Struk*: Cukup kirim foto struk transaksi Anda langsung di sini`
     );
     return;
   }
@@ -612,7 +632,7 @@ const handleTextMessage = async (externalId: string, messagingAccountId: string,
 
   if (isAIError(result)) {
     if (result.error === 'NO_AMOUNT') {
-      await sendMainMenu(externalId, 'Tidak ada nominal yang terdeteksi.');
+      await sendMainMenu(externalId, USAGE_INSTRUCTIONS);
     } else {
       await TelegramService.sendTextMessage(externalId, '😔 Layanan AI sedang sibuk. Coba lagi dalam beberapa menit.');
     }
