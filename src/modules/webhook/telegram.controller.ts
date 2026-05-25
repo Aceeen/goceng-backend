@@ -187,10 +187,24 @@ const handleMenuRouter = async (
   }
 
   if (buttonData === 'menu_rekening') {
-    await TelegramService.sendInteractiveButtons(externalId, '💼 *Kelola Rekening*\n\nMau ngapain?', [
-      { id: 'menu_rekening_tambah', title: '➕ Tambah Rekening' },
-      { id: 'menu_rekening_ubah',   title: '✏️ Ubah Saldo' },
-    ]);
+    const accounts = await prisma.account.findMany({
+      where: { messagingAccountId: account.id, isActive: true },
+      select: { id: true, name: true, currentBalance: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const buttons = accounts.map(a => ({
+      id: `ubah_${a.id}`,
+      title: `${a.name} (Rp ${Number(a.currentBalance).toLocaleString('id-ID')})`
+    }));
+
+    buttons.push({ id: 'menu_rekening_tambah', title: '➕ Tambah Rekening' });
+
+    await TelegramService.sendInteractiveButtons(
+      externalId,
+      '💼 *Kelola Rekening*\n\nPilih rekening yang mau diubah saldonya atau tambah rekening baru:',
+      buttons
+    );
     return;
   }
 
@@ -385,22 +399,6 @@ const handleMenuRouter = async (
     return;
   }
 
-  // ── Ubah Saldo: show account list ────────────────────────────────────────
-  if (buttonData === 'menu_rekening_ubah') {
-    const accounts = await prisma.account.findMany({
-      where: { messagingAccountId: account.id, isActive: true },
-      select: { id: true, name: true, currentBalance: true }, orderBy: { createdAt: 'asc' },
-    });
-    if (!accounts.length) {
-      await TelegramService.sendTextMessage(externalId, '❌ Belum ada rekening. Tambah rekening dulu ya!');
-      return;
-    }
-    await TelegramService.sendInteractiveButtons(
-      externalId, '✏️ Pilih rekening yang mau diubah saldonya:',
-      accounts.map(a => ({ id: `ubah_${a.id}`, title: `${a.name} (Rp ${Number(a.currentBalance).toLocaleString('id-ID')})` }))
-    );
-    return;
-  }
 
   // ── Ubah Saldo: account selected → ask new balance ───────────────────────
   if (buttonData?.startsWith('ubah_')) {
