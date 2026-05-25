@@ -245,10 +245,25 @@ const handleMenuRouter = async (
 
   // ── Rutin main submenu ────────────────────────────────────────────────────
   if (buttonData === 'menu_rutin') {
-    await TelegramService.sendInteractiveButtons(externalId, '📅 *Pengeluaran Rutin*\n\nMau ngapain?', [
-      { id: 'menu_rutin_tambah', title: '➕ Tambah Rutin Baru' },
-      { id: 'menu_rutin_kelola', title: '📋 Lihat & Kelola Rutin' },
-    ]);
+    const routines = await prisma.routineExpense.findMany({
+      where: { messagingAccountId: account.id, isActive: true },
+      select: { id: true, title: true, amount: true, frequency: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const FREQ_LABEL: Record<string, string> = { DAILY: 'Harian', WEEKLY: 'Mingguan', MONTHLY: 'Bulanan', ANNUALLY: 'Tahunan' };
+    const buttons = routines.map(r => ({
+      id: `rutin_sel_${r.id}`,
+      title: `${r.title} — Rp ${Number(r.amount).toLocaleString('id-ID')} (${FREQ_LABEL[r.frequency]})`
+    }));
+
+    buttons.push({ id: 'menu_rutin_tambah', title: '➕ Tambah Rutin Baru' });
+
+    await TelegramService.sendInteractiveButtons(
+      externalId,
+      '📅 *Pengeluaran Rutin*\n\nPilih rutin yang mau dikelola atau tambah rutin baru:',
+      buttons
+    );
     return;
   }
 
@@ -263,24 +278,6 @@ const handleMenuRouter = async (
     return;
   }
 
-  // ── Rutin: list for management ────────────────────────────────────────────
-  if (buttonData === 'menu_rutin_kelola') {
-    const routines = await prisma.routineExpense.findMany({
-      where: { messagingAccountId: account.id, isActive: true },
-      select: { id: true, title: true, amount: true, frequency: true },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (!routines.length) {
-      await TelegramService.sendTextMessage(externalId, '📋 Belum ada pengeluaran rutin. Tambah dulu ya!');
-      return;
-    }
-    const FREQ_LABEL: Record<string, string> = { DAILY: 'Harian', WEEKLY: 'Mingguan', MONTHLY: 'Bulanan', ANNUALLY: 'Tahunan' };
-    await TelegramService.sendInteractiveButtons(
-      externalId, '📋 Pilih rutin yang mau dikelola:',
-      routines.map(r => ({ id: `rutin_sel_${r.id}`, title: `${r.title} — Rp ${Number(r.amount).toLocaleString('id-ID')} (${FREQ_LABEL[r.frequency]})` }))
-    );
-    return;
-  }
 
   // ── Rutin: selected — show actions ────────────────────────────────────────
   if (buttonData?.startsWith('rutin_sel_')) {
