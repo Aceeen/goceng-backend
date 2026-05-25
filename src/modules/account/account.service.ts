@@ -1,5 +1,6 @@
 import { AccountType } from '@prisma/client';
 import { prisma } from '../../config/prisma';
+import { SheetsService } from '../sheets/sheets.service';
 
 export class AccountService {
   static async getAccountsByMessagingAccountId(messagingAccountId: string) {
@@ -9,7 +10,7 @@ export class AccountService {
   }
 
   static async createAccount(messagingAccountId: string, data: { name: string; type: AccountType; initialBalance: number; color?: string; icon?: string }) {
-    return prisma.account.create({
+    const acc = await prisma.account.create({
       data: {
         messagingAccountId,
         name: data.name,
@@ -20,19 +21,25 @@ export class AccountService {
         icon: data.icon,
       }
     });
+    SheetsService.triggerAccountSync(messagingAccountId);
+    return acc;
   }
 
   static async updateAccount(id: string, messagingAccountId: string, data: { name?: string; color?: string; icon?: string }) {
-    return prisma.account.update({
+    const acc = await prisma.account.update({
       where: { id, messagingAccountId },
       data,
     });
+    SheetsService.triggerAccountSync(messagingAccountId);
+    return acc;
   }
 
   static async deleteAccount(id: string, messagingAccountId: string) {
-    return prisma.account.update({
+    const acc = await prisma.account.update({
       where: { id, messagingAccountId },
       data: { isActive: false },
     });
+    SheetsService.triggerAccountSync(messagingAccountId);
+    return acc;
   }
 }

@@ -201,6 +201,13 @@ if (spreadsheetId) {
           where: { id: transaction.id },
           data: { isSynced: true },
         });
+
+        // Sync accounts to sheets since currentBalance has been updated
+        await SheetsService.syncAccountsToSheet(
+          accountMeta.userId,
+          spreadsheetId,
+          messagingAccountId
+        );
       }
     } catch (err) {
       console.error('[Sheets] Gagal sync transaksi:', err);

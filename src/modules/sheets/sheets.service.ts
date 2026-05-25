@@ -69,6 +69,76 @@ export class SheetsService {
   }
 
   /**
+   * Syncs all accounts of a messaging account to the user's spreadsheet.
+   */
+  static async syncAccountsToSheet(userId: string, spreadsheetId: string, messagingAccountId: string) {
+    await this.authenticateUser(userId);
+
+    const accounts = await prisma.account.findMany({
+      where: { messagingAccountId, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    try {
+      let sheetName = 'ACCOUNTS';
+      try {
+        await sheetsAPI.spreadsheets.values.clear({
+          spreadsheetId,
+          range: `${sheetName}!A2:F100`,
+        });
+      } catch (err) {
+        sheetName = 'Accounts';
+        await sheetsAPI.spreadsheets.values.clear({
+          spreadsheetId,
+          range: `${sheetName}!A2:F100`,
+        });
+      }
+
+      if (accounts.length > 0) {
+        const values = accounts.map((acc) => [
+          acc.id,
+          acc.name,
+          acc.type,
+          Number(acc.initialBalance),
+          Number(acc.currentBalance),
+          acc.updatedAt.toISOString(),
+        ]);
+
+        await sheetsAPI.spreadsheets.values.update({
+          spreadsheetId,
+          range: `${sheetName}!A2:F${accounts.length + 1}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values,
+          },
+        });
+      }
+      console.log(`✅ Accounts synced to Sheets for user ${userId}.`);
+    } catch (error) {
+      console.error(`❌ Failed to sync accounts to Sheets for user ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Helper to trigger async account sync in background
+   */
+  static triggerAccountSync(messagingAccountId: string) {
+    setImmediate(async () => {
+      try {
+        const accountMeta = await prisma.messagingAccount.findUnique({
+          where: { id: messagingAccountId },
+          select: { spreadsheetId: true, userId: true },
+        });
+        if (accountMeta?.spreadsheetId && accountMeta?.userId) {
+          await this.syncAccountsToSheet(accountMeta.userId, accountMeta.spreadsheetId, messagingAccountId);
+        }
+      } catch (err) {
+        console.error('[Sheets] triggerAccountSync error:', err);
+      }
+    });
+  }
+
+  /**
    * Copy the Master Spreadsheet Template to the user's Drive.
    */
   static async setupUserSpreadsheet(userId: string): Promise<string> {

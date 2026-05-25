@@ -270,6 +270,41 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
     return;
   }
 
+  if (buttonId === 'btn_change_account') {
+    const accounts = await prisma.account.findMany({
+      where: { messagingAccountId, isActive: true },
+      select: { id: true, name: true },
+      orderBy: { createdAt: 'asc' }
+    });
+    if (!accounts.length) {
+      await WhatsAppService.sendTextMessage(fromNumber, '❌ Tidak ada rekening aktif.');
+      return;
+    }
+    await WhatsAppService.sendInteractiveButtons(
+      fromNumber,
+      '🏦 Pilih rekening untuk transaksi ini:',
+      accounts.map(a => ({ id: `btn_set_account_${a.id}`, title: a.name }))
+    );
+    return;
+  }
+
+  if (buttonId.startsWith('btn_set_account_')) {
+    const accountId = buttonId.replace('btn_set_account_', '');
+    const merged = { ...(session.extractedData as any), accountId };
+    
+    await prisma.transactionSession.update({
+      where: { id: session.id },
+      data: { extractedData: merged }
+    });
+
+    if (merged.case === 'FOREIGN') {
+      await sendForeignConfirmationMessage(fromNumber, merged, session.id);
+    } else {
+      await sendConfirmationMessage(fromNumber, merged, session.id);
+    }
+    return;
+  }
+
   if (buttonId === BTN_EDIT) {
     await updateSessionStatus(session.id, 'EDITED');
     await WhatsAppService.sendTextMessage(
@@ -346,7 +381,8 @@ const sendConfirmationMessage = async (
   sessionId: string
 ) => {
   const amount     = Number(data.totalAmount ?? data.amount ?? 0).toLocaleString('id-ID');
-  const merchant   = data.merchantName ?? data.description ?? 'Tidak diketahui';
+  const merchant   = data.merchantName || '-';
+  const description = data.description || '-';
   const category   = data.suggestedCategory ?? 'Belum dikategorikan';
   const confidence = Math.round((data.confidence ?? 1) * 100);
   const date       = data.transactionDate
@@ -363,18 +399,35 @@ const itemText =
         })
         .join('\n')
     : '-';
+
+  const messagingAccount = await prisma.messagingAccount.findFirst({
+    where: { platform: 'WHATSAPP', externalId: fromNumber },
+    select: { id: true }
+  });
+  if (!messagingAccount) return;
+  const messagingAccountId = messagingAccount.id;
+
+  const account = data.accountId
+    ? await prisma.account.findFirst({ where: { id: data.accountId, messagingAccountId, isActive: true } })
+    : await prisma.account.findFirst({ where: { messagingAccountId, isActive: true }, orderBy: { createdAt: 'asc' } });
+  
+  const accountName = account ? account.name : 'Belum ditentukan';
+
   await WhatsAppService.sendInteractiveButtons(
     fromNumber,
     `🧾 *GOCENG mendeteksi transaksi:*\n\n` +
     `• 🏪 Merchant: *${merchant}*\n` +
+    `• 📝 Deskripsi: *${description}*\n` +
     `• 💰 Total: *Rp ${amount}*\n` +
     `• 📁 Kategori: *${category}*\n` +
+    `• 🏦 Rekening: *${accountName}*\n` +
     `• 📅 Tanggal: *${date}*\n` +
     `• 🤖 Keyakinan AI: *${confidence}%*\n\n` +
     `🛒 *Detail Item:*\n${itemText}\n\n` +
     `Apakah data ini sudah benar?`,
     [
       { id: BTN_CONFIRM, title: '✅ Ya, Simpan' },
+      { id: 'btn_change_account', title: '🏦 Ubah Rekening' },
       { id: BTN_EDIT,    title: '✏️ Edit'       },
       { id: BTN_CANCEL,  title: '❌ Batal'      },
     ]
@@ -392,7 +445,8 @@ const sendForeignConfirmationMessage = async (
   const totalIDR       = Number(data.totalAmount).toLocaleString('id-ID');
   const originalAmount = Number(data.originalAmount).toLocaleString('en-US');
   const exchangeRate   = Number(data.exchangeRate).toLocaleString('id-ID');
-  const merchant       = data.merchantName ?? 'Tidak diketahui';
+  const merchant       = data.merchantName || '-';
+  const description    = data.description || '-';
   const category       = data.suggestedCategory ?? 'Belum dikategorikan';
   const confidence     = Math.round((data.confidence ?? 1) * 100);
   const date           = data.transactionDate
@@ -409,14 +463,30 @@ const itemText =
         })
         .join('\n')
     : '-';
+
+  const messagingAccount = await prisma.messagingAccount.findFirst({
+    where: { platform: 'WHATSAPP', externalId: fromNumber },
+    select: { id: true }
+  });
+  if (!messagingAccount) return;
+  const messagingAccountId = messagingAccount.id;
+
+  const account = data.accountId
+    ? await prisma.account.findFirst({ where: { id: data.accountId, messagingAccountId, isActive: true } })
+    : await prisma.account.findFirst({ where: { messagingAccountId, isActive: true }, orderBy: { createdAt: 'asc' } });
+  
+  const accountName = account ? account.name : 'Belum ditentukan';
+
   await WhatsAppService.sendInteractiveButtons(
     fromNumber,
     `🌏 *GOCENG mendeteksi struk LUAR NEGERI:*\n\n` +
     `• 🏪 Merchant: *${merchant}*\n` +
+    `• 📝 Deskripsi: *${description}*\n` +
     `• 💵 Total asli: *${data.originalCurrency} ${originalAmount}*\n` +
     `• 💱 Kurs pakai: *1 ${data.originalCurrency} = Rp ${exchangeRate}*\n` +
     `• 💰 Total IDR: *Rp ${totalIDR}*\n` +
     `• 📁 Kategori: *${category}*\n` +
+    `• 🏦 Rekening: *${accountName}*\n` +
     `• 📅 Tanggal: *${date}*\n` +
     `• 🤖 Keyakinan AI: *${confidence}%*\n\n` +
     `⚠️ _Kurs adalah perkiraan. Koreksi jika perlu._\n\n` +
@@ -424,6 +494,7 @@ const itemText =
     `Apakah data ini sudah benar?`,
     [
       { id: BTN_CONFIRM, title: '✅ Ya, Simpan' },
+      { id: 'btn_change_account', title: '🏦 Ubah Rekening' },
       { id: BTN_EDIT,    title: '✏️ Edit Kurs'  },
       { id: BTN_CANCEL,  title: '❌ Batal'      },
     ]

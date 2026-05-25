@@ -3,6 +3,7 @@ import { env } from '../../config/env';
 import { TelegramService } from './telegram.service';
 import { prisma } from '../../config/prisma';
 import { DriveService } from '../sheets/drive.service';
+import { SheetsService } from '../sheets/sheets.service';
 
 // AI Module
 import { extractFromImage, extractFromText, applyUserCorrection } from '../ai/ai.service';
@@ -133,6 +134,7 @@ const processTelegramPayload = async (payload: any) => {
 
     // Handle slash commands
     if (textBody?.startsWith('/')) {
+      SheetsService.triggerAccountSync(messagingAccount.id);
       await sendMainMenu(externalId);
       return;
     }
@@ -432,6 +434,7 @@ const handleMenuRouter = async (
       const balance = Number(textBody.replace(/[^0-9]/g, ''));
       if (isNaN(balance)) { await TelegramService.sendTextMessage(externalId, '❌ Tulis angka saja, contoh: 500000'); return; }
       await prisma.account.create({ data: { messagingAccountId: account.id, name: sessionData.name, type: sessionData.accountType, initialBalance: balance, currentBalance: balance } });
+      SheetsService.triggerAccountSync(account.id);
       await prisma.transactionSession.update({ where: { id: activeSession.id }, data: { status: 'SAVED' } });
       await TelegramService.sendTextMessage(externalId, `✅ Rekening *${sessionData.name}* ditambahkan! Saldo: Rp ${balance.toLocaleString('id-ID')}`);
       return;
@@ -443,6 +446,7 @@ const handleMenuRouter = async (
     const balance = Number(textBody.replace(/[^0-9]/g, ''));
     if (isNaN(balance)) { await TelegramService.sendTextMessage(externalId, '❌ Tulis angka saja, contoh: 1500000'); return; }
     await prisma.account.update({ where: { id: sessionData.accountId }, data: { currentBalance: balance } });
+    SheetsService.triggerAccountSync(account.id);
     await prisma.transactionSession.update({ where: { id: activeSession.id }, data: { status: 'SAVED' } });
     await TelegramService.sendTextMessage(externalId, `✅ Saldo *${sessionData.accountName}* diperbarui: Rp ${balance.toLocaleString('id-ID')}`);
     return;
@@ -491,6 +495,7 @@ const handleOnboarding = async (externalId: string, messagingAccountId: string, 
     const balance = Number(textBody.replace(/[^0-9]/g, ''));
     if (isNaN(balance)) { await TelegramService.sendTextMessage(externalId, '❌ Tulis angka saja, contoh: 500000'); return; }
     await prisma.account.create({ data: { messagingAccountId, name: sd.name, type: sd.accountType, initialBalance: balance, currentBalance: balance } });
+    SheetsService.triggerAccountSync(messagingAccountId);
     await prisma.messagingAccount.update({ where: { id: messagingAccountId }, data: { isOnboarded: true } });
     await prisma.transactionSession.update({ where: { id: session.id }, data: { status: 'SAVED' } });
     await TelegramService.sendTextMessage(externalId,
@@ -602,6 +607,41 @@ const handleButtonReply = async (externalId: string, messagingAccountId: string,
     return;
   }
 
+  if (buttonId === 'btn_change_account') {
+    const accounts = await prisma.account.findMany({
+      where: { messagingAccountId, isActive: true },
+      select: { id: true, name: true },
+      orderBy: { createdAt: 'asc' }
+    });
+    if (!accounts.length) {
+      await TelegramService.sendTextMessage(externalId, '❌ Tidak ada rekening aktif.');
+      return;
+    }
+    await TelegramService.sendInteractiveButtons(
+      externalId,
+      '🏦 Pilih rekening untuk transaksi ini:',
+      accounts.map(a => ({ id: `btn_set_account_${a.id}`, title: a.name }))
+    );
+    return;
+  }
+
+  if (buttonId.startsWith('btn_set_account_')) {
+    const accountId = buttonId.replace('btn_set_account_', '');
+    const merged = { ...(session.extractedData as any), accountId };
+    
+    await prisma.transactionSession.update({
+      where: { id: session.id },
+      data: { extractedData: merged }
+    });
+
+    if (merged.case === 'FOREIGN') {
+      await sendForeignConfirmationMessage(externalId, merged, session.id);
+    } else {
+      await sendConfirmationMessage(externalId, merged, session.id);
+    }
+    return;
+  }
+
   if (buttonId === BTN_EDIT) {
     await updateSessionStatus(session.id, 'EDITED');
     await TelegramService.sendTextMessage(externalId, '✏️ Apa yang ingin dikoreksi?\n_Contoh: "Harganya 55000" atau "Kategori: Transportasi"_');
@@ -628,14 +668,23 @@ const handleEditCorrection = async (externalId: string, editingSession: any, cor
     if (unit === 'jt' || unit === 'juta') amount = raw * 1000000;
     const merged = { ...(editingSession.extractedData as any), amount, totalAmount: amount };
     await resetSessionToPending(editingSession.id, merged);
-    await sendConfirmationMessage(externalId, merged, editingSession.id);
+    if (merged.case === 'FOREIGN') {
+      await sendForeignConfirmationMessage(externalId, merged, editingSession.id);
+    } else {
+      await sendConfirmationMessage(externalId, merged, editingSession.id);
+    }
     return;
   }
   const corrected = await applyUserCorrection(correctionText, editingSession.extractedData as object);
   if (isAIError(corrected)) { await TelegramService.sendTextMessage(externalId, '😔 Gagal koreksi. Tulis lebih jelas ya.'); return; }
   const merged = { ...(editingSession.extractedData as object), ...corrected };
   await resetSessionToPending(editingSession.id, merged);
-  await sendConfirmationMessage(externalId, merged as any, editingSession.id);
+  const data = merged as any;
+  if (data.case === 'FOREIGN') {
+    await sendForeignConfirmationMessage(externalId, data, editingSession.id);
+  } else {
+    await sendConfirmationMessage(externalId, data, editingSession.id);
+  }
 };
 
 // =============================================================================
@@ -643,20 +692,73 @@ const handleEditCorrection = async (externalId: string, editingSession: any, cor
 // =============================================================================
 const sendConfirmationMessage = async (externalId: string, data: any, sessionId: string) => {
   const amount = Number(data.totalAmount ?? data.amount ?? 0).toLocaleString('id-ID');
-  const merchant = data.merchantName ?? data.description ?? 'Tidak diketahui';
+  const merchant = data.merchantName || '-';
+  const description = data.description || '-';
   const category = data.suggestedCategory ?? 'Belum dikategorikan';
+
+  const messagingAccount = await prisma.messagingAccount.findFirst({
+    where: { platform: 'TELEGRAM', externalId },
+    select: { id: true }
+  });
+  if (!messagingAccount) return;
+  const messagingAccountId = messagingAccount.id;
+
+  const account = data.accountId
+    ? await prisma.account.findFirst({ where: { id: data.accountId, messagingAccountId, isActive: true } })
+    : await prisma.account.findFirst({ where: { messagingAccountId, isActive: true }, orderBy: { createdAt: 'asc' } });
+  
+  const accountName = account ? account.name : 'Belum ditentukan';
+
   await TelegramService.sendInteractiveButtons(
     externalId,
-    `🧾 *GOCENG mendeteksi transaksi:*\n\n• 🏪 ${merchant}\n• 💰 Rp ${amount}\n• 📁 ${category}\n\nSudah benar?`,
-    [{ id: BTN_CONFIRM, title: '✅ Ya, Simpan' }, { id: BTN_EDIT, title: '✏️ Edit' }, { id: BTN_CANCEL, title: '❌ Batal' }]
+    `🧾 *GOCENG mendeteksi transaksi:*\n\n` +
+    `• 🏪 Merchant: ${merchant}\n` +
+    `• 📝 Deskripsi: ${description}\n` +
+    `• 💰 Total: Rp ${amount}\n` +
+    `• 📁 Kategori: ${category}\n` +
+    `• 🏦 Rekening: ${accountName}\n\n` +
+    `Sudah benar?`,
+    [
+      { id: BTN_CONFIRM, title: '✅ Ya, Simpan' },
+      { id: 'btn_change_account', title: '🏦 Ubah Rekening' },
+      { id: BTN_EDIT, title: '✏️ Edit' },
+      { id: BTN_CANCEL, title: '❌ Batal' }
+    ]
   );
 };
 
 const sendForeignConfirmationMessage = async (externalId: string, data: any, sessionId: string) => {
   const totalIDR = Number(data.totalAmount).toLocaleString('id-ID');
+  const merchant = data.merchantName || '-';
+  const description = data.description || '-';
+
+  const messagingAccount = await prisma.messagingAccount.findFirst({
+    where: { platform: 'TELEGRAM', externalId },
+    select: { id: true }
+  });
+  if (!messagingAccount) return;
+  const messagingAccountId = messagingAccount.id;
+
+  const account = data.accountId
+    ? await prisma.account.findFirst({ where: { id: data.accountId, messagingAccountId, isActive: true } })
+    : await prisma.account.findFirst({ where: { messagingAccountId, isActive: true }, orderBy: { createdAt: 'asc' } });
+  
+  const accountName = account ? account.name : 'Belum ditentukan';
+
   await TelegramService.sendInteractiveButtons(
     externalId,
-    `🌏 *Struk LUAR NEGERI:*\n\n• 💵 ${data.originalCurrency} ${data.originalAmount}\n• 💰 Rp ${totalIDR}\n\nSudah benar?`,
-    [{ id: BTN_CONFIRM, title: '✅ Ya, Simpan' }, { id: BTN_EDIT, title: '✏️ Edit' }, { id: BTN_CANCEL, title: '❌ Batal' }]
+    `🌏 *Struk LUAR NEGERI:*\n\n` +
+    `• 🏪 Merchant: ${merchant}\n` +
+    `• 📝 Deskripsi: ${description}\n` +
+    `• 💵 Nominal: ${data.originalCurrency} ${data.originalAmount}\n` +
+    `• 💰 Total: Rp ${totalIDR}\n` +
+    `• 🏦 Rekening: ${accountName}\n\n` +
+    `Sudah benar?`,
+    [
+      { id: BTN_CONFIRM, title: '✅ Ya, Simpan' },
+      { id: 'btn_change_account', title: '🏦 Ubah Rekening' },
+      { id: BTN_EDIT, title: '✏️ Edit' },
+      { id: BTN_CANCEL, title: '❌ Batal' }
+    ]
   );
 };
