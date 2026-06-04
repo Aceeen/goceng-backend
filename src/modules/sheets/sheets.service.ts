@@ -1,6 +1,7 @@
 import { sheetsAPI, oauth2Client } from '../../config/googleClient';
 import { prisma } from '../../config/prisma';
 import { decryptToken } from '../../utils/encryption';
+import { env } from '../../config/env';
 
 /**
  * Service handling Google Sheets Data sync operations.
@@ -64,6 +65,9 @@ export class SheetsService {
       return response.data;
     } catch (error) {
       console.error(`❌ Failed to append transaction for user ${userId}:`, error);
+      if (transaction?.messagingAccountId) {
+        await this.handleOAuthError(error, transaction.messagingAccountId);
+      }
       throw error;
     }
   }
@@ -116,6 +120,7 @@ export class SheetsService {
       console.log(`✅ Accounts synced to Sheets for user ${userId}.`);
     } catch (error) {
       console.error(`❌ Failed to sync accounts to Sheets for user ${userId}:`, error);
+      await this.handleOAuthError(error, messagingAccountId);
     }
   }
 
@@ -190,6 +195,7 @@ export class SheetsService {
       console.log(`✅ Budgets synced to Sheets for user ${userId}.`);
     } catch (error) {
       console.error(`❌ Failed to sync budgets to Sheets for user ${userId}:`, error);
+      await this.handleOAuthError(error, messagingAccountId);
     }
   }
 
@@ -222,5 +228,54 @@ export class SheetsService {
     // const copyResponse = await driveAPI.files.copy({ ... })
     // return copyResponse.data.id;
     throw new Error('Not Implemented: copy template');
+  }
+
+  /**
+   * Detects Google OAuth expired/revoked credentials (invalid_grant) and sends a notification to the user to reconnect.
+   */
+  private static async handleOAuthError(error: any, messagingAccountId: string) {
+    const errStr = String(error?.message || error || '');
+    const errResponseData = String(JSON.stringify(error?.response?.data || {}));
+
+    if (errStr.includes('invalid_grant') || errResponseData.includes('invalid_grant')) {
+      console.warn(`[Sheets] Google OAuth token expired/revoked for account ${messagingAccountId}. Notifying user...`);
+
+      try {
+        const messagingAccount = await prisma.messagingAccount.findUnique({
+          where: { id: messagingAccountId },
+          select: { platform: true, externalId: true },
+        });
+
+        if (messagingAccount) {
+          const { platform, externalId } = messagingAccount;
+          const loginLink = platform === 'TELEGRAM'
+            ? `${env.BACKEND_URL ?? env.FRONTEND_URL}/v1/auth/google?tg=${externalId}`
+            : `${env.FRONTEND_URL}/login?platform=WHATSAPP&id=${externalId}`;
+
+          const message = platform === 'TELEGRAM'
+            ? `⚠️ *Koneksi Google Anda Terputus!*\n\n` +
+              `GOCENG gagal memasukkan transaksi Anda ke Google Sheets karena izin Google Anda telah kedaluwarsa atau dicabut.\n\n` +
+              `Silakan hubungkan kembali akun Google Anda melalui tautan berikut:\n` +
+              `🔗 [Hubungkan Ulang Google](${loginLink})\n\n` +
+              `Setelah menghubungkan ulang, silakan catat kembali transaksi Anda.`
+            : `⚠️ *Koneksi Google Anda Terputus!*\n\n` +
+              `GOCENG gagal memasukkan transaksi Anda ke Google Sheets karena izin Google Anda telah kedaluwarsa atau dicabut.\n\n` +
+              `Silakan hubungkan kembali akun Google Anda melalui tautan berikut:\n` +
+              `🔗 ${loginLink}\n\n` +
+              `Setelah menghubungkan ulang, silakan catat kembali transaksi Anda.`;
+
+          const { TelegramService } = await import('../webhook/telegram.service');
+          const { WhatsAppService } = await import('../webhook/whatsapp.service');
+
+          if (platform === 'TELEGRAM') {
+            await TelegramService.sendTextMessage(externalId, message);
+          } else {
+            await WhatsAppService.sendTextMessage(externalId, message);
+          }
+        }
+      } catch (notifyErr) {
+        console.error('[Sheets] Gagal mengirim notifikasi token expired ke user:', notifyErr);
+      }
+    }
   }
 }
