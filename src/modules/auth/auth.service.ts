@@ -5,6 +5,7 @@ import { prisma } from '../../config/prisma';
 import { env } from '../../config/env';
 import { encryptToken } from '../../utils/encryption';
 import crypto from 'crypto';
+import { SheetsService } from '../sheets/sheets.service';
 
 export class AuthService {
   private static hasConfiguredMasterSpreadsheet(): boolean {
@@ -133,6 +134,14 @@ export class AuthService {
           scope: tokens.scope || '',
         },
       });
+
+      // After saving a fresh token, trigger a full background re-sync so any data
+      // written to the DB while Google was disconnected (invalid_grant) is pushed
+      // to Sheets immediately — without the user having to do anything.
+      if (messagingAccount) {
+        console.log(`[Auth] Google token refreshed — triggering full Sheets re-sync for ${messagingAccount.id}`);
+        SheetsService.triggerFullSync(messagingAccount.id);
+      }
     }
 
     // 6. Handle master spreadsheet duplication and folder configuration if missing

@@ -33,6 +33,12 @@ const USAGE_INSTRUCTIONS =
   `• _"Freelance 1.5jt"_\n\n` +
   `📸 *Gunakan Foto Struk*\n` +
   `Cukup kirim foto struk transaksi Anda langsung di sini.\n\n` +
+  `🔄 *Sinkronisasi Manual (/sync)*\n` +
+  `Ketik */sync* jika data di Google Sheets terasa tidak lengkap atau berbeda dengan yang ada di sini.\n` +
+  `Lakukan ini terutama setelah:\n` +
+  `• Baru saja login ulang Google\n` +
+  `• Koneksi Google sempat terputus\n` +
+  `• Ada transaksi/budget yang tidak muncul di spreadsheet\n\n` +
   `Gunakan menu di bawah untuk mengelola rekening, budget, pengeluaran rutin, atau mencetak laporan. 👇`;
 
 const OB_ACCOUNT_TYPES = [
@@ -172,6 +178,29 @@ const processTelegramPayload = async (payload: any) => {
 
     // Handle slash commands
     if (textBody?.startsWith('/')) {
+      const command = textBody.trim().toLowerCase().split(/\s+/)[0];
+
+      if (command === '/sync') {
+        // Check if Google is connected before attempting
+        const hasMeta = await prisma.messagingAccount.findUnique({
+          where: { id: messagingAccount.id },
+          select: { spreadsheetId: true }
+        });
+        if (!hasMeta?.spreadsheetId) {
+          await TelegramService.sendTextMessage(externalId,
+            '⚠️ Google Sheets belum terhubung. Silakan login ulang Google terlebih dahulu lewat aplikasi.'
+          );
+          return;
+        }
+        await TelegramService.sendTextMessage(externalId, '🔄 Memulai sinkronisasi data ke Google Sheets...');
+        SheetsService.triggerFullSync(messagingAccount.id);
+        await TelegramService.sendTextMessage(externalId,
+          '✅ Sinkronisasi dimulai di latar belakang!\n\nSemua transaksi, rekening, dan budget yang belum tersinkron akan muncul di spreadsheet-mu dalam beberapa saat.'
+        );
+        return;
+      }
+
+      // All other slash commands (/menu, /start, /help, etc.)
       SheetsService.triggerAccountSync(messagingAccount.id);
       SheetsService.triggerBudgetSync(messagingAccount.id);
       await sendMainMenu(externalId, USAGE_INSTRUCTIONS);

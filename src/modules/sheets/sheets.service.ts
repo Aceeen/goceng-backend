@@ -217,6 +217,71 @@ export class SheetsService {
   }
 
   /**
+   * Full re-sync: writes all Accounts, Budgets, and any unsynced Transactions to
+   * the user's Google Spreadsheet. Use this after Google re-authentication to
+   * guarantee the sheet is never stale after a token-expired gap.
+   */
+  static async syncAllToSheet(userId: string, spreadsheetId: string, messagingAccountId: string) {
+    console.log(`[Sheets] Starting full sync for messagingAccount ${messagingAccountId}...`);
+
+    // 1. Sync Accounts tab
+    await this.syncAccountsToSheet(userId, spreadsheetId, messagingAccountId);
+
+    // 2. Sync Budgets tab
+    await this.syncBudgetsToSheet(userId, spreadsheetId, messagingAccountId);
+
+    // 3. Re-append all transactions that were never synced (isSynced = false)
+    const unsynced = await prisma.transaction.findMany({
+      where: { messagingAccountId, isSynced: false, isConfirmed: true, deletedAt: null },
+      include: {
+        category: { select: { name: true } },
+        account: { select: { name: true } },
+      },
+      orderBy: { transactionDate: 'asc' },
+    });
+
+    for (const tx of unsynced) {
+      try {
+        // Fetch the account balance at append time (best approximation)
+        const account = await prisma.account.findUnique({ where: { id: tx.accountId }, select: { currentBalance: true } });
+        await this.appendTransaction(userId, spreadsheetId, {
+          ...tx,
+          transactionDate: tx.transactionDate.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+          amount: Number(tx.amount),
+          currentBalance: Number(account?.currentBalance ?? 0),
+        });
+        await prisma.transaction.update({ where: { id: tx.id }, data: { isSynced: true } });
+        console.log(`[Sheets] Re-synced transaction ${tx.id}`);
+      } catch (err) {
+        console.error(`[Sheets] Failed to re-sync transaction ${tx.id}:`, err);
+      }
+    }
+
+    console.log(`[Sheets] Full sync complete. Re-synced ${unsynced.length} pending transactions.`);
+  }
+
+  /**
+   * Background helper to trigger a full re-sync for a given messagingAccountId.
+   */
+  static triggerFullSync(messagingAccountId: string) {
+    setImmediate(async () => {
+      try {
+        const accountMeta = await prisma.messagingAccount.findUnique({
+          where: { id: messagingAccountId },
+          select: { spreadsheetId: true, userId: true },
+        });
+        if (accountMeta?.spreadsheetId && accountMeta?.userId) {
+          await this.syncAllToSheet(accountMeta.userId, accountMeta.spreadsheetId, messagingAccountId);
+        } else {
+          console.warn(`[Sheets] triggerFullSync: No spreadsheet linked for account ${messagingAccountId}`);
+        }
+      } catch (err) {
+        console.error('[Sheets] triggerFullSync error:', err);
+      }
+    });
+  }
+
+  /**
    * Copy the Master Spreadsheet Template to the user's Drive.
    */
   static async setupUserSpreadsheet(userId: string): Promise<string> {
