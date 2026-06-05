@@ -222,6 +222,23 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
   }
 
   if (buttonId === BTN_CONFIRM) {
+    // Atomically claim the session by transitioning status from PENDING to CONFIRMED
+    const updated = await prisma.transactionSession.updateMany({
+      where: {
+        id: session.id,
+        status: 'PENDING',
+        expiresAt: { gt: new Date() }
+      },
+      data: {
+        status: 'CONFIRMED'
+      }
+    });
+
+    if (updated.count === 0) {
+      console.warn(`[WhatsApp] Confirm button double clicked or session already processed for user ${messagingAccountId}`);
+      return; // Exit silently to avoid duplicate inserts
+    }
+
     try {
       const data = session.extractedData as any;
       const rawPayload = session.rawPayload as any;
