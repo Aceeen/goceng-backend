@@ -352,31 +352,63 @@ const handleEditCorrection = async (
   fromNumber: string, editingSession: any, correctionText: string
 ) => {
   await WhatsAppService.sendTextMessage(fromNumber, '✏️ Menerapkan koreksimu...');
-const match = correctionText.toLowerCase().match(/(\d+(?:[.,]\d+)?)\s*(rb|ribu|k|jt|juta)?/);
 
-if (match) {
-  const raw = Number(match[1].replace(',', '.'));
-  const unit = match[2];
+  const cleanText = correctionText.trim();
 
-  let amount = raw;
-  if (unit === 'rb' || unit === 'ribu' || unit === 'k') amount = raw * 1000;
-  if (unit === 'jt' || unit === 'juta') amount = raw * 1000000;
+  // 1. Direct Regex Prefix Parsing for description to ensure instant, deterministic updates
+  const descPrefixPattern = /^\s*(?:deskripsi|description|deskripsinya)\s*[:\s\-]?\s*(.+)$/i;
+  const descMatch = cleanText.match(descPrefixPattern);
+  if (descMatch) {
+    const value = descMatch[1].trim();
+    if (value) {
+      const merged = { ...(editingSession.extractedData as any), description: value };
+      await resetSessionToPending(editingSession.id, merged);
+      if (merged.case === 'FOREIGN') {
+        await sendForeignConfirmationMessage(fromNumber, merged, editingSession.id);
+      } else {
+        await sendConfirmationMessage(fromNumber, merged, editingSession.id);
+      }
+      return;
+    }
+  }
 
-  const merged = {
-    ...(editingSession.extractedData as any),
-    amount,
-    totalAmount: amount
-  };
+  // Only treat the message as a pure "amount update" when it contains ONLY a number
+  // (with optional whitespace and unit suffix). If the user mentions any field keyword
+  // like "deskripsinya", "kategori", "merchantnya", etc., we must forward to AI so it
+  // applies the correct field, rather than blindly overwriting the amount.
+  const FIELD_KEYWORDS = /deskripsi|kategori|merchant|toko|tanggal|kurs|total|harga/i;
+  const pureAmountPattern = /^\s*(\d+(?:[.,]\d+)?)\s*(rb|ribu|k|jt|juta)?\s*$/i;
+  const pureAmountMatch = correctionText.match(pureAmountPattern);
 
-  await resetSessionToPending(editingSession.id, merged);
-  await sendConfirmationMessage(fromNumber, merged, editingSession.id);
-  return;
-}
-  const corrected = await applyUserCorrection(correctionText, editingSession.extractedData as object);
-
-  if (isAIError(corrected)) {
-    await WhatsAppService.sendTextMessage(fromNumber, '😔 Gagal menerapkan koreksi. Tulis lebih jelas ya.');
+  if (pureAmountMatch && !FIELD_KEYWORDS.test(correctionText)) {
+    const raw = Number(pureAmountMatch[1].replace(',', '.'));
+    const unit = pureAmountMatch[2];
+    let amount = raw;
+    if (unit === 'rb' || unit === 'ribu' || unit === 'k') amount = raw * 1000;
+    if (unit === 'jt' || unit === 'juta') amount = raw * 1000000;
+    const merged = { ...(editingSession.extractedData as any), amount, totalAmount: amount };
+    await resetSessionToPending(editingSession.id, merged);
+    if (merged.case === 'FOREIGN') {
+      await sendForeignConfirmationMessage(fromNumber, merged, editingSession.id);
+    } else {
+      await sendConfirmationMessage(fromNumber, merged, editingSession.id);
+    }
     return;
+  }
+
+  let corrected = await applyUserCorrection(correctionText, editingSession.extractedData as object);
+
+  // 2. Fallback: If AI fails (no field matched) and user sent a text correction,
+  // treat the input as the new transaction description.
+  if (isAIError(corrected)) {
+    console.log('[AI] WhatsApp correction failed, falling back to description overwrite');
+    const value = cleanText;
+    if (value.length > 0) {
+      corrected = { description: value };
+    } else {
+      await WhatsAppService.sendTextMessage(fromNumber, '😔 Gagal menerapkan koreksi. Tulis lebih jelas ya.');
+      return;
+    }
   }
 
   const merged = { ...(editingSession.extractedData as object), ...corrected };
@@ -389,7 +421,6 @@ if (match) {
   } else {
     await sendConfirmationMessage(fromNumber, data, editingSession.id);
   }
-
 };
 
 // =============================================================================

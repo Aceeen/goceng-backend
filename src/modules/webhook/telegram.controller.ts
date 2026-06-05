@@ -918,6 +918,25 @@ const handleButtonReply = async (externalId: string, messagingAccountId: string,
 const handleEditCorrection = async (externalId: string, editingSession: any, correctionText: string) => {
   await TelegramService.sendTextMessage(externalId, '✏️ Menerapkan koreksi...');
 
+  const cleanText = correctionText.trim();
+
+  // 1. Direct Regex Prefix Parsing for description to ensure instant, deterministic updates
+  const descPrefixPattern = /^\s*(?:deskripsi|description|deskripsinya)\s*[:\s\-]?\s*(.+)$/i;
+  const descMatch = cleanText.match(descPrefixPattern);
+  if (descMatch) {
+    const value = descMatch[1].trim();
+    if (value) {
+      const merged = { ...(editingSession.extractedData as any), description: value };
+      await resetSessionToPending(editingSession.id, merged);
+      if (merged.case === 'FOREIGN') {
+        await sendForeignConfirmationMessage(externalId, merged, editingSession.id);
+      } else {
+        await sendConfirmationMessage(externalId, merged, editingSession.id);
+      }
+      return;
+    }
+  }
+
   // Only treat the message as a pure "amount update" when it contains ONLY a number
   // (with optional whitespace and unit suffix). If the user mentions any field keyword
   // like "deskripsinya", "kategori", "merchantnya", etc., we must forward to AI so it
@@ -941,8 +960,22 @@ const handleEditCorrection = async (externalId: string, editingSession: any, cor
     }
     return;
   }
-  const corrected = await applyUserCorrection(correctionText, editingSession.extractedData as object);
-  if (isAIError(corrected)) { await TelegramService.sendTextMessage(externalId, '😔 Gagal koreksi. Tulis lebih jelas ya.'); return; }
+
+  let corrected = await applyUserCorrection(correctionText, editingSession.extractedData as object);
+  
+  // 2. Fallback: If AI fails (no field matched) and user sent a text correction,
+  // treat the input as the new transaction description.
+  if (isAIError(corrected)) {
+    console.log('[AI] Correction failed, falling back to description overwrite');
+    const value = cleanText;
+    if (value.length > 0) {
+      corrected = { description: value };
+    } else {
+      await TelegramService.sendTextMessage(externalId, '😔 Gagal koreksi. Tulis lebih jelas ya.');
+      return;
+    }
+  }
+
   const merged = { ...(editingSession.extractedData as object), ...corrected };
   await resetSessionToPending(editingSession.id, merged);
   const data = merged as any;

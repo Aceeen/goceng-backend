@@ -184,10 +184,10 @@ Koreksi dari user: "${correction}"
 - Kembalikan HANYA JSON valid.
 
 Panduan interpretasi:
-- "harganya X" / "totalnya X" → ubah totalAmount atau amount
-- "kategori X" / "kategorinya X" → ubah suggestedCategory
-- "tanggalnya X" / "kemarin" / "hari ini" → ubah transactionDate ke YYYY-MM-DD
-- "merchantnya X" / "tokonya X" → ubah merchantName
-- "deskripsinya X" → ubah description
-- "kursnya X" → ubah exchangeRate, lalu hitung ulang totalAmount = originalAmount × exchangeRate
+- "harganya X" / "totalnya X" / "harga: X" / "total: X" / "amount: X" → ubah totalAmount atau amount (ambil nominal angkanya saja)
+- "kategori X" / "kategorinya X" / "kategori: X" / "category: X" → ubah suggestedCategory
+- "tanggalnya X" / "tanggal: X" / "date: X" / "kemarin" / "hari ini" → ubah transactionDate ke YYYY-MM-DD
+- "merchantnya X" / "tokonya X" / "merchant: X" / "tokonya: X" → ubah merchantName
+- "deskripsinya X" / "deskripsi: X" / "description: X" → ubah description (pastikan nilainya HANYA X, jangan masukkan kata "deskripsi:" atau "description:" ke dalam nilai description)
+- "kursnya X" / "kurs: X" → ubah exchangeRate, lalu hitung ulang totalAmount = originalAmount × exchangeRate
 `.trim();
