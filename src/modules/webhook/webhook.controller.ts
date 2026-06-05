@@ -303,7 +303,7 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
     await WhatsAppService.sendInteractiveButtons(
       fromNumber,
       '🏦 Pilih rekening untuk transaksi ini:',
-      accounts.map(a => ({ id: `btn_set_account_${a.id}`, title: a.name }))
+      accounts.map((a: any) => ({ id: `btn_set_account_${a.id}`, title: a.name }))
     );
     return;
   }

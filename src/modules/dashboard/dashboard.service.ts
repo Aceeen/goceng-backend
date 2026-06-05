@@ -110,7 +110,7 @@ export class DashboardService {
     ]);
 
     let totalBalance = 0;
-    const formattedAccounts = accounts.map((account) => {
+    const formattedAccounts = accounts.map((account: any) => {
       const balance = Number(account.currentBalance);
       totalBalance += balance;
       return {
@@ -134,7 +134,7 @@ export class DashboardService {
       4: { income: 0, expense: 0 },
     };
 
-    currentMonthTxs.forEach((tx) => {
+    currentMonthTxs.forEach((tx: any) => {
       const amount = Number(tx.amount);
       const week = Math.ceil(tx.transactionDate.getDate() / 7);
       const safeWeek = week > 4 ? 4 : week;
@@ -160,7 +160,7 @@ export class DashboardService {
       }
     });
 
-    previousMonthTxs.forEach((tx) => {
+    previousMonthTxs.forEach((tx: any) => {
       const amount = Number(tx.amount);
       if (tx.type === 'INCOME') previousMonthlyIncome += amount;
       if (tx.type === 'EXPENSE') previousMonthlyExpense += amount;
@@ -176,7 +176,7 @@ export class DashboardService {
           ? Number(((categoryTotals[categoryId].amount / monthlyExpense) * 100).toFixed(1))
           : 0,
       }))
-      .sort((a, b) => b.amount - a.amount);
+      .sort((a: any, b: any) => b.amount - a.amount);
 
     const cashFlowByWeek = [1, 2, 3, 4].map((week) => ({
       week,
@@ -184,13 +184,13 @@ export class DashboardService {
       expense: weeks[week].expense,
     }));
 
-    const budgetHighlights = budgets.map((budget) => ({
+    const budgetHighlights = budgets.map((budget: any) => ({
       categoryName: budget.category.name,
       percentage: budget.percentage,
       status: budget.status,
     }));
 
-    const normalizedRecentTransactions = recentTransactions.map((tx) => ({
+    const normalizedRecentTransactions = recentTransactions.map((tx: any) => ({
       id: tx.id,
       title: tx.description || tx.merchantName || tx.category?.name || 'Transaksi',
       date: tx.transactionDate.toLocaleDateString('id-ID', {
@@ -204,7 +204,7 @@ export class DashboardService {
     }));
 
     const gamification = this.calculateGamification(
-      allTransactionDates.map((transaction) => transaction.transactionDate)
+      allTransactionDates.map((transaction: any) => transaction.transactionDate)
     );
 
     return {

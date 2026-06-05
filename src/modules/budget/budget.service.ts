@@ -16,7 +16,7 @@ export class BudgetService {
     const endDate = new Date(currentYear, currentMonth, 0, 23, 59, 59, 999);
 
     const budgetsWithProgress = await Promise.all(
-      budgets.map(async (b) => {
+      budgets.map(async (b: any) => {
         const agg = await prisma.transaction.aggregate({
           where: {
             messagingAccountId,

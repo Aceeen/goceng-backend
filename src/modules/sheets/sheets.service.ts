@@ -98,7 +98,7 @@ export class SheetsService {
       }
 
       if (accounts.length > 0) {
-        const values = accounts.map((acc) => [
+        const values = accounts.map((acc: any) => [
           acc.id,
           acc.name,
           acc.type,
@@ -173,7 +173,7 @@ export class SheetsService {
       }
 
       if (budgets.length > 0) {
-        const values = budgets.map((b) => [
+        const values = budgets.map((b: any) => [
           b.category?.name || '',
           b.month,
           b.year,

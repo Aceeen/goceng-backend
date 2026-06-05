@@ -1,4 +1,4 @@
-import { TransactionType } from '@prisma/client';
+import { TransactionType, Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 
 export class TransactionService {
@@ -50,7 +50,7 @@ export class TransactionService {
   }
 
   static async createTransaction(messagingAccountId: string, data: any) {
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // 1. Create the Transaction & Items
       const transaction = await tx.transaction.create({
         data: {
@@ -93,7 +93,7 @@ export class TransactionService {
   }
 
   static async deleteTransaction(id: string, messagingAccountId: string) {
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const transaction = await tx.transaction.findUnique({
         where: { id, messagingAccountId }
       });

@@ -37,7 +37,7 @@ export class ReportService {
       SUN: { income: 0, expense: 0 },
     };
 
-    const formattedTransactions = transactions.map((tx) => {
+    const formattedTransactions = transactions.map((tx: any) => {
       const amount = Number(tx.amount);
       const weekday = weekdayByJsDay[tx.transactionDate.getDay()];
 
@@ -87,13 +87,13 @@ export class ReportService {
         percentage: totalExpense > 0 ? Number(((category.amount / totalExpense) * 100).toFixed(1)) : 0,
         transactionCount: category.count,
       }))
-      .sort((a, b) => b.total - a.total);
+      .sort((a: any, b: any) => b.total - a.total);
 
     const accounts = await prisma.account.findMany({
       where: { messagingAccountId, isActive: true },
     });
 
-    const formattedAccounts = accounts.map((account) => ({
+    const formattedAccounts = accounts.map((account: any) => ({
       name: account.name,
       type: account.type,
       closingBalance: Number(account.currentBalance),
@@ -104,7 +104,7 @@ export class ReportService {
       include: { category: true },
     });
 
-    const formattedBudgets = budgets.map((budget) => {
+    const formattedBudgets = budgets.map((budget: any) => {
       const realized = categoryAgg[budget.categoryId]?.amount || 0;
       const limit = Number(budget.limitAmount);
       const percentage = limit > 0 ? (realized / limit) * 100 : 0;

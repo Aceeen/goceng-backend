@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import { prisma } from '../../config/prisma';
-import { ExpenseFrequency, TransactionType, TransactionSource } from '@prisma/client';
+import { ExpenseFrequency, TransactionType, TransactionSource, Prisma } from '@prisma/client';
 
 export const initRoutineCron = () => {
   // Run every day at midnight server time
@@ -68,7 +68,7 @@ export const processRoutineExpenses = async () => {
       }
 
       // 4. Create the actual transaction
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         // Create transaction
         await tx.transaction.create({
           data: {
