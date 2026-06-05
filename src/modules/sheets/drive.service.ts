@@ -1,7 +1,6 @@
 import { driveAPI, oauth2Client, sheetsAPI } from '../../config/googleClient';
 import { prisma } from '../../config/prisma';
 import { decryptToken } from '../../utils/encryption';
-import { Readable } from 'stream';
 
 export class DriveService {
   /**
@@ -39,10 +38,12 @@ export class DriveService {
     });
     const targetFolderId = account?.googleDriveFolderId;
 
-    // Convert strict Buffer into a Readable stream for Google Drive Media requirements
-    const stream = new Readable();
-    stream.push(imageBuffer);
-    stream.push(null);
+    // Convert strict Buffer into a Readable stream for Google Drive Media requirements.
+    // Using PassThrough avoids a race condition where push/null are called before the API
+    // client has attached its read listener, which caused the stream to be silently empty.
+    const { PassThrough } = await import('stream');
+    const stream = new PassThrough();
+    stream.end(imageBuffer);
 
     try {
       const fileMeta = await driveAPI.files.create({

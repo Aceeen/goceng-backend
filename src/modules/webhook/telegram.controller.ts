@@ -888,10 +888,18 @@ const handleButtonReply = async (externalId: string, messagingAccountId: string,
 // =============================================================================
 const handleEditCorrection = async (externalId: string, editingSession: any, correctionText: string) => {
   await TelegramService.sendTextMessage(externalId, '✏️ Menerapkan koreksi...');
-  const match = correctionText.toLowerCase().match(/(\d+(?:[.,]\d+)?)\s*(rb|ribu|k|jt|juta)?/);
-  if (match) {
-    const raw = Number(match[1].replace(',', '.'));
-    const unit = match[2];
+
+  // Only treat the message as a pure "amount update" when it contains ONLY a number
+  // (with optional whitespace and unit suffix). If the user mentions any field keyword
+  // like "deskripsinya", "kategori", "merchantnya", etc., we must forward to AI so it
+  // applies the correct field, rather than blindly overwriting the amount.
+  const FIELD_KEYWORDS = /deskripsi|kategori|merchant|toko|tanggal|kurs|total|harga/i;
+  const pureAmountPattern = /^\s*(\d+(?:[.,]\d+)?)\s*(rb|ribu|k|jt|juta)?\s*$/i;
+  const pureAmountMatch = correctionText.match(pureAmountPattern);
+
+  if (pureAmountMatch && !FIELD_KEYWORDS.test(correctionText)) {
+    const raw = Number(pureAmountMatch[1].replace(',', '.'));
+    const unit = pureAmountMatch[2];
     let amount = raw;
     if (unit === 'rb' || unit === 'ribu' || unit === 'k') amount = raw * 1000;
     if (unit === 'jt' || unit === 'juta') amount = raw * 1000000;

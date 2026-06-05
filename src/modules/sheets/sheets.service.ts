@@ -76,14 +76,13 @@ export class SheetsService {
    * Syncs all accounts of a messaging account to the user's spreadsheet.
    */
   static async syncAccountsToSheet(userId: string, spreadsheetId: string, messagingAccountId: string) {
-    await this.authenticateUser(userId);
-
     const accounts = await prisma.account.findMany({
       where: { messagingAccountId, isActive: true },
       orderBy: { createdAt: 'asc' },
     });
 
     try {
+      await this.authenticateUser(userId);
       let sheetName = 'ACCOUNTS';
       try {
         await sheetsAPI.spreadsheets.values.clear({
@@ -147,8 +146,6 @@ export class SheetsService {
    * Syncs all budgets of a messaging account to the user's spreadsheet.
    */
   static async syncBudgetsToSheet(userId: string, spreadsheetId: string, messagingAccountId: string) {
-    await this.authenticateUser(userId);
-
     const budgets = await prisma.budget.findMany({
       where: { messagingAccountId },
       include: { category: true },
@@ -160,6 +157,7 @@ export class SheetsService {
     });
 
     try {
+      await this.authenticateUser(userId);
       let sheetName = 'BUDGETS';
       try {
         await sheetsAPI.spreadsheets.values.clear({
