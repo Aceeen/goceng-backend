@@ -117,7 +117,7 @@ export class SheetsService {
         transaction.account?.name || '',
         transaction.source,
         transaction.currentBalance, // balance after transaction
-        transaction.imageUrl ? `=HYPERLINK("${transaction.imageUrl}", "Lihat Foto")` : '',
+        transaction.imageUrl || '',
         new Date().toISOString() // Or custom DD/MM/YYYY HH:mm formatted string
       ],
     ];
@@ -359,7 +359,7 @@ export class SheetsService {
           tx.account?.name || '',
           tx.source,
           Number(tx.account?.currentBalance ?? 0),
-          tx.imageUrl ? `=HYPERLINK("${tx.imageUrl}", "Lihat Foto")` : '',
+          tx.imageUrl || '',
           tx.createdAt.toISOString()
         ]);
 
