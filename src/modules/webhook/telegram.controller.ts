@@ -454,7 +454,7 @@ const handleMenuRouter = async (
     const parts = buttonData.split('_');
     const month = parseInt(parts[1]);
     const year = parseInt(parts[2]);
-    const sheetName = `${MONTHS_ID[month - 1]} ${year}`;
+    const sheetName = MONTHS_ID[month - 1];
 
     await TelegramService.sendTextMessage(externalId, `⏳ Sedang mencetak *${sheetName}*...`);
 

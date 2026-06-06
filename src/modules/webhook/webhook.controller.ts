@@ -205,6 +205,39 @@ const result = await extractFromImage(base64, 'image/jpeg');
 // HANDLER: Tombol YA SIMPAN / EDIT / BATAL
 // =============================================================================
 const handleButtonReply = async (fromNumber: string, messagingAccountId: string, buttonId: string) => {
+  if (buttonId.startsWith('cetak_')) {
+    const parts = buttonId.split('_');
+    const month = parseInt(parts[1]);
+    const year = parseInt(parts[2]);
+    const MONTHS_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const sheetName = MONTHS_ID[month - 1];
+
+    await WhatsAppService.sendTextMessage(fromNumber, `⏳ Sedang mencetak laporan *${sheetName}*...`);
+
+    const account = await prisma.messagingAccount.findUnique({
+      where: { id: messagingAccountId }
+    });
+
+    if (!account?.spreadsheetId) {
+      await WhatsAppService.sendTextMessage(fromNumber, '❌ Google Sheet belum terhubung.');
+      return;
+    }
+
+    try {
+      const pdfBuffer = await DriveService.exportSheetByName(account.userId, account.spreadsheetId, sheetName);
+      if (!pdfBuffer) {
+        await WhatsAppService.sendTextMessage(fromNumber, `❌ Tab *${sheetName}* tidak ditemukan di spreadsheet.`);
+        return;
+      }
+
+      await WhatsAppService.sendDocument(fromNumber, pdfBuffer, `GOCENG_Laporan_${sheetName}_${year}.pdf`);
+    } catch (error) {
+      console.error('Failed to export and send PDF to WhatsApp:', error);
+      await WhatsAppService.sendTextMessage(fromNumber, '❌ Gagal mencetak laporan PDF.');
+    }
+    return;
+  }
+
   const session = await getPendingSession(messagingAccountId);
 
   if (!session) {
