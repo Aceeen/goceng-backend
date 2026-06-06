@@ -375,13 +375,45 @@ const handleEditCorrection = async (
 
   const cleanText = correctionText.trim();
 
-  // 1. Direct Regex Prefix Parsing for description to ensure instant, deterministic updates
+  // 1. Direct Regex Prefix Parsing to ensure instant, deterministic updates
   const descPrefixPattern = /^\s*(?:deskripsi|description|deskripsinya)\s*[:\s\-]?\s*(.+)$/i;
   const descMatch = cleanText.match(descPrefixPattern);
   if (descMatch) {
     const value = descMatch[1].trim();
     if (value) {
       const merged = { ...(editingSession.extractedData as any), description: value };
+      await resetSessionToPending(editingSession.id, merged);
+      if (merged.case === 'FOREIGN') {
+        await sendForeignConfirmationMessage(fromNumber, merged, editingSession.id);
+      } else {
+        await sendConfirmationMessage(fromNumber, merged, editingSession.id);
+      }
+      return;
+    }
+  }
+
+  const merchantPrefixPattern = /^\s*(?:merchant|merchantnya|toko|tokonya)\s*[:\s\-]?\s*(.+)$/i;
+  const merchantMatch = cleanText.match(merchantPrefixPattern);
+  if (merchantMatch) {
+    const value = merchantMatch[1].trim();
+    if (value) {
+      const merged = { ...(editingSession.extractedData as any), merchantName: value };
+      await resetSessionToPending(editingSession.id, merged);
+      if (merged.case === 'FOREIGN') {
+        await sendForeignConfirmationMessage(fromNumber, merged, editingSession.id);
+      } else {
+        await sendConfirmationMessage(fromNumber, merged, editingSession.id);
+      }
+      return;
+    }
+  }
+
+  const categoryPrefixPattern = /^\s*(?:kategori|kategorinya|category|categoryname)\s*[:\s\-]?\s*(.+)$/i;
+  const categoryMatch = cleanText.match(categoryPrefixPattern);
+  if (categoryMatch) {
+    const value = categoryMatch[1].trim();
+    if (value) {
+      const merged = { ...(editingSession.extractedData as any), suggestedCategory: value };
       await resetSessionToPending(editingSession.id, merged);
       if (merged.case === 'FOREIGN') {
         await sendForeignConfirmationMessage(fromNumber, merged, editingSession.id);
