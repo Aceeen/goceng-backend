@@ -4,21 +4,44 @@ import { prisma } from '../src/config/prisma';
 async function main() {
   console.log('🧪 Starting Spreadsheet Recovery Integration Tests...');
 
-  // 1. Fetch a test messaging account
-  const account = await prisma.messagingAccount.findFirst({
+  // 1. Fetch all candidate messaging accounts
+  const candidateAccounts = await prisma.messagingAccount.findMany({
+    where: { NOT: { spreadsheetId: null } },
     include: { user: true }
   });
-  if (!account) {
-    console.error('❌ No MessagingAccount found in the database. Please register/create one first.');
+
+  if (candidateAccounts.length === 0) {
+    console.error('❌ No MessagingAccount with active spreadsheetId found in the database.');
     return;
   }
-  const messagingAccountId = account.id;
-  const userId = account.userId;
-  console.log(`ℹ️ Using MessagingAccount ID: ${messagingAccountId}, User ID: ${userId}`);
+
+  let testAccount = null;
+
+  // Find an account that has a valid OAuth token
+  for (const account of candidateAccounts) {
+    try {
+      console.log(`Checking token validity for account ID: ${account.id} (user: ${account.userId})...`);
+      // Trigger a light authenticating action
+      await (SheetsService as any).authenticateUser(account.userId);
+      testAccount = account;
+      break;
+    } catch (err) {
+      console.warn(`⚠️ Account ${account.id} token is expired/revoked:`, (err as any).message || err);
+    }
+  }
+
+  if (!testAccount) {
+    console.log('ℹ️ No candidate account has a currently valid token. Using the first one as fallback.');
+    testAccount = candidateAccounts[0];
+  }
+
+  const messagingAccountId = testAccount.id;
+  const userId = testAccount.userId;
+  console.log(`ℹ️ Selected Test MessagingAccount ID: ${messagingAccountId}, User ID: ${userId}`);
 
   // Store original values to restore after test
-  const originalSpreadsheetId = account.spreadsheetId;
-  const originalDriveFolderId = account.googleDriveFolderId;
+  const originalSpreadsheetId = testAccount.spreadsheetId;
+  const originalDriveFolderId = testAccount.googleDriveFolderId;
 
   try {
     // 2. Test checkIfSpreadsheetExists with a non-existent ID
@@ -45,13 +68,6 @@ async function main() {
     (mock404Error as any).code = 404;
 
     console.log('Triggering handleOAuthError with 404 error...');
-    // We invoke the private/public handleOAuthError method. Since it's private in sheets.service.ts,
-    // wait, is it private or public?
-    // Let's check: in sheets.service.ts, we have:
-    // `private static async handleOAuthError(error: any, messagingAccountId: string)`
-    // Oh, it is private! Since it's private, we can trigger it indirectly by appending a transaction
-    // with a failing spreadsheetId, OR we can temporarily cast to any to call it.
-    // Let's cast to any: (SheetsService as any).handleOAuthError(mock404Error, messagingAccountId)
     await (SheetsService as any).handleOAuthError(mock404Error, messagingAccountId);
 
     // Verify database record
@@ -67,6 +83,8 @@ async function main() {
       console.error('❌ Failed: spreadsheetId was not reset to null!');
     }
 
+  } catch (err: any) {
+    console.error('❌ Integration check failed due to error:', err.message || err);
   } finally {
     // Restore original values
     await prisma.messagingAccount.update({

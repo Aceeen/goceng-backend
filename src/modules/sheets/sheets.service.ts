@@ -335,7 +335,10 @@ export class SheetsService {
           messagingAccountId,
           isConfirmed: true,
           deletedAt: null,
-          transactionDate: { gte: startDate, lte: endDate }
+          OR: [
+            { transactionDate: { gte: startDate, lte: endDate } },
+            { createdAt: { gte: startDate, lte: endDate } }
+          ]
         },
         include: {
           category: { select: { name: true } },
