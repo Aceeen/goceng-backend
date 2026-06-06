@@ -2,6 +2,7 @@ import { sheetsAPI, oauth2Client } from '../../config/googleClient';
 import { prisma } from '../../config/prisma';
 import { decryptToken, encryptToken } from '../../utils/encryption';
 import { env } from '../../config/env';
+import { google } from 'googleapis';
 
 /**
  * Service handling Google Sheets Data sync operations.
@@ -290,34 +291,186 @@ export class SheetsService {
     // 2. Sync Budgets tab
     await this.syncBudgetsToSheet(userId, spreadsheetId, messagingAccountId);
 
-    // 3. Re-append all transactions that were never synced (isSynced = false)
-    const unsynced = await prisma.transaction.findMany({
-      where: { messagingAccountId, isSynced: false, isConfirmed: true, deletedAt: null },
-      include: {
-        category: { select: { name: true } },
-        account: { select: { name: true } },
-      },
-      orderBy: { transactionDate: 'asc' },
+    // 3. Sync Transactions tab (Full batch rewrite for current year to avoid duplicates)
+    try {
+      await this.authenticateUser(userId);
+      
+      // Clear all existing transactions in the sheet (from row 2 down)
+      await sheetsAPI.spreadsheets.values.clear({
+        spreadsheetId,
+        range: 'TRANSACTIONS!A2:L10000',
+      });
+
+      // Query all transactions of the CURRENT YEAR
+      const currentYear = new Date().getFullYear();
+      const startDate = new Date(currentYear, 0, 1);
+      const endDate = new Date(currentYear, 11, 31, 23, 59, 59, 999);
+
+      const transactions = await prisma.transaction.findMany({
+        where: {
+          messagingAccountId,
+          isConfirmed: true,
+          deletedAt: null,
+          transactionDate: { gte: startDate, lte: endDate }
+        },
+        include: {
+          category: { select: { name: true } },
+          account: { select: { name: true } },
+        },
+        orderBy: { transactionDate: 'asc' },
+      });
+
+      if (transactions.length > 0) {
+        const values = transactions.map((tx: any) => [
+          tx.id,
+          `${String(tx.transactionDate.getDate()).padStart(2, '0')}/${String(tx.transactionDate.getMonth() + 1).padStart(2, '0')}/${tx.transactionDate.getFullYear()}`,
+          tx.type,
+          Number(tx.amount),
+          tx.category?.name || '',
+          tx.description || '',
+          tx.merchantName || '',
+          tx.account?.name || '',
+          tx.source,
+          Number(tx.account?.currentBalance ?? 0),
+          tx.imageUrl || '',
+          tx.createdAt.toISOString()
+        ]);
+
+        await sheetsAPI.spreadsheets.values.update({
+          spreadsheetId,
+          range: `TRANSACTIONS!A2:L${transactions.length + 1}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values,
+          },
+        });
+
+        // Mark all as synced in database
+        await prisma.transaction.updateMany({
+          where: {
+            id: { in: transactions.map(t => t.id) }
+          },
+          data: {
+            isSynced: true
+          }
+        });
+      }
+
+      console.log(`[Sheets] Full sync complete. Synced ${transactions.length} transactions for current year (${currentYear}).`);
+    } catch (err) {
+      console.error(`[Sheets] Failed to sync transactions to Sheets for user ${userId}:`, err);
+      await this.handleOAuthError(err, messagingAccountId);
+    }
+  }
+
+  static async checkIfSpreadsheetExists(userId: string, spreadsheetId: string): Promise<boolean> {
+    try {
+      await this.authenticateUser(userId);
+      await sheetsAPI.spreadsheets.get({
+        spreadsheetId,
+        fields: 'spreadsheetId'
+      });
+      return true;
+    } catch (err: any) {
+      const errStr = String(err.message || err);
+      if (errStr.includes('not found') || err.code === 404 || err.status === 404) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  static async regenerateSpreadsheet(messagingAccountId: string): Promise<string> {
+    const accountMeta = await prisma.messagingAccount.findUnique({
+      where: { id: messagingAccountId },
+      select: { userId: true, platform: true, externalId: true }
     });
 
-    for (const tx of unsynced) {
-      try {
-        // Fetch the account balance at append time (best approximation)
-        const account = await prisma.account.findUnique({ where: { id: tx.accountId }, select: { currentBalance: true } });
-        await this.appendTransaction(userId, spreadsheetId, {
-          ...tx,
-          transactionDate: tx.transactionDate.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }),
-          amount: Number(tx.amount),
-          currentBalance: Number(account?.currentBalance ?? 0),
-        });
-        await prisma.transaction.update({ where: { id: tx.id }, data: { isSynced: true } });
-        console.log(`[Sheets] Re-synced transaction ${tx.id}`);
-      } catch (err) {
-        console.error(`[Sheets] Failed to re-sync transaction ${tx.id}:`, err);
-      }
+    if (!accountMeta || !accountMeta.userId) {
+      throw new Error('User account not found');
     }
 
-    console.log(`[Sheets] Full sync complete. Re-synced ${unsynced.length} pending transactions.`);
+    const { userId, platform, externalId } = accountMeta;
+    await this.authenticateUser(userId);
+
+    const driveAPI = google.drive({ version: 'v3', auth: oauth2Client });
+    
+    // 1. Check or Create GOCENG Master Folder
+    let rootFolderId: string;
+    const rootSearch = await driveAPI.files.list({
+      q: "name='GOCENG' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+      fields: 'files(id)'
+    });
+    if (rootSearch.data.files && rootSearch.data.files.length > 0) {
+      rootFolderId = rootSearch.data.files[0].id!;
+    } else {
+      const rootFolderRes = await driveAPI.files.create({
+        requestBody: { name: 'GOCENG', mimeType: 'application/vnd.google-apps.folder' },
+        fields: 'id'
+      });
+      rootFolderId = rootFolderRes.data.id!;
+    }
+
+    // 2. Create Platform Specific Folder
+    const platformFolderName = `${platform.toLowerCase()}_${externalId}`;
+    let platformFolderId: string;
+    const platformSearch = await driveAPI.files.list({
+      q: `name='${platformFolderName}' and mimeType='application/vnd.google-apps.folder' and '${rootFolderId}' in parents and trashed=false`,
+      fields: 'files(id)'
+    });
+    if (platformSearch.data.files && platformSearch.data.files.length > 0) {
+      platformFolderId = platformSearch.data.files[0].id!;
+    } else {
+      const platformFolderRes = await driveAPI.files.create({
+        requestBody: { 
+          name: platformFolderName, 
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: [rootFolderId]
+        },
+        fields: 'id'
+      });
+      platformFolderId = platformFolderRes.data.id!;
+    }
+
+    // 3. Create Bukti Transaksi Sub-folder
+    let googleDriveFolderId: string;
+    const subSearch = await driveAPI.files.list({
+      q: `name='bukti_transaksi' and mimeType='application/vnd.google-apps.folder' and '${platformFolderId}' in parents and trashed=false`,
+      fields: 'files(id)'
+    });
+    if (subSearch.data.files && subSearch.data.files.length > 0) {
+      googleDriveFolderId = subSearch.data.files[0].id!;
+    } else {
+      const subFolderRes = await driveAPI.files.create({
+        requestBody: { 
+          name: 'bukti_transaksi', 
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: [platformFolderId]
+        },
+        fields: 'id'
+      });
+      googleDriveFolderId = subFolderRes.data.id!;
+    }
+
+    // 4. Copy Spreadsheet Template
+    const copyRes = await driveAPI.files.copy({
+      fileId: env.MASTER_SPREADSHEET_ID,
+      requestBody: {
+        name: `GOCENG Record - ${platformFolderName}`,
+        parents: [platformFolderId]
+      },
+      fields: 'id'
+    });
+    const spreadsheetId = copyRes.data.id!;
+
+    // 5. Save setup to MessagingAccount
+    await prisma.messagingAccount.update({
+      where: { id: messagingAccountId },
+      data: { spreadsheetId, googleDriveFolderId },
+    });
+
+    console.log(`[Regenerate Setup] Complete. Sheet: ${spreadsheetId}, Folder: ${googleDriveFolderId}`);
+    return spreadsheetId;
   }
 
   /**
@@ -359,6 +512,48 @@ export class SheetsService {
   private static async handleOAuthError(error: any, messagingAccountId: string) {
     const errStr = String(error?.message || error || '');
     const errResponseData = String(JSON.stringify(error?.response?.data || {}));
+    const isNotFound = errStr.includes('not found') || error?.code === 404 || error?.status === 404 || errResponseData.includes('notFound');
+
+    if (isNotFound) {
+      console.warn(`[Sheets] Google Sheet not found for account ${messagingAccountId}. Clearing spreadsheetId and notifying user...`);
+      try {
+        await prisma.messagingAccount.update({
+          where: { id: messagingAccountId },
+          data: { spreadsheetId: null }
+        });
+
+        const messagingAccount = await prisma.messagingAccount.findUnique({
+          where: { id: messagingAccountId },
+          select: { platform: true, externalId: true },
+        });
+
+        if (messagingAccount) {
+          const { platform, externalId } = messagingAccount;
+          const loginLink = platform === 'TELEGRAM'
+            ? `${env.BACKEND_URL ?? env.FRONTEND_URL}/v1/auth/google?tg=${externalId}`
+            : `${env.FRONTEND_URL}/login?platform=WHATSAPP&id=${externalId}`;
+
+          const message = `⚠️ *File Google Sheets Tidak Ditemukan!*\n\n` +
+            `File sheets tidak ditemukan. Klik [Tautkan Ulang] untuk membuat file baru. /sync untuk menyinkronkan data`;
+
+          if (platform === 'TELEGRAM') {
+            const { TelegramService } = await import('../webhook/telegram.service');
+            await TelegramService.sendInteractiveButtons(externalId, message, [
+              { url: loginLink, title: '🔗 Tautkan Ulang' },
+              { id: 'regenerate_sheets', title: '🖨️ Buat Ulang Spreadsheet' }
+            ]);
+          } else {
+            const { WhatsAppService } = await import('../webhook/whatsapp.service');
+            await WhatsAppService.sendInteractiveButtons(externalId, message, [
+              { id: 'regenerate_sheets', title: 'Buat Ulang Sheet' }
+            ]);
+          }
+        }
+      } catch (notifyErr) {
+        console.error('[Sheets] Failed to handle missing sheet error:', notifyErr);
+      }
+      return;
+    }
 
     if (errStr.includes('invalid_grant') || errResponseData.includes('invalid_grant')) {
       console.warn(`[Sheets] Google OAuth token expired/revoked for account ${messagingAccountId}. Notifying user...`);

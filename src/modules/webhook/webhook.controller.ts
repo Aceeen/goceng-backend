@@ -4,6 +4,7 @@ import { Request, Response } from 'express';
 import { env } from '../../config/env';
 import { WhatsAppService } from './whatsapp.service';
 import { DriveService } from '../sheets/drive.service';
+import { SheetsService } from '../sheets/sheets.service';
 import { prisma } from '../../config/prisma';
 import fs from 'fs';
 import path from 'path';
@@ -112,6 +113,56 @@ const processAsyncPayload = async (payload: any) => {
 
     // ── ROUTING: Pesan baru ───────────────────────────────────────────────
     if (msgType === 'text') {
+      const textVal = message.text.body.trim().toLowerCase();
+      if (textVal === '/sync' || textVal === 'sync') {
+        const hasMeta = await prisma.messagingAccount.findUnique({
+          where: { id: messagingAccount.id },
+          select: { spreadsheetId: true, userId: true }
+        });
+
+        let exists = false;
+        if (hasMeta?.spreadsheetId && hasMeta?.userId) {
+          try {
+            exists = await SheetsService.checkIfSpreadsheetExists(hasMeta.userId, hasMeta.spreadsheetId);
+          } catch (err) {
+            console.error('Error checking sheet existence in WhatsApp /sync:', err);
+          }
+        }
+
+        if (!hasMeta?.spreadsheetId || !exists) {
+          if (hasMeta?.spreadsheetId) {
+            await prisma.messagingAccount.update({
+              where: { id: messagingAccount.id },
+              data: { spreadsheetId: null }
+            });
+          }
+
+          const tokenRecord = hasMeta?.userId
+            ? await prisma.oAuthToken.findUnique({ where: { userId: hasMeta.userId } })
+            : null;
+
+          if (tokenRecord) {
+            const loginLink = `${env.FRONTEND_URL}/login?platform=WHATSAPP&id=${fromNumber}`;
+            const messageText = `File sheets tidak ditemukan. Klik [Tautkan Ulang] untuk membuat file baru. /sync untuk menyinkronkan data\n\nLink: ${loginLink}`;
+            await WhatsAppService.sendInteractiveButtons(fromNumber, messageText, [
+              { id: 'regenerate_sheets', title: 'Buat Ulang Sheet' }
+            ]);
+          } else {
+            await WhatsAppService.sendTextMessage(fromNumber,
+              '⚠️ Google Sheets belum terhubung. Silakan login ulang Google terlebih dahulu lewat aplikasi.'
+            );
+          }
+          return;
+        }
+
+        await WhatsAppService.sendTextMessage(fromNumber, '🔄 Memulai sinkronisasi data ke Google Sheets...');
+        SheetsService.triggerFullSync(messagingAccount.id);
+        await WhatsAppService.sendTextMessage(fromNumber,
+          '✅ Sinkronisasi dimulai di latar belakang!\n\nSemua transaksi tahun ini, rekening, dan budget sedang disinkronkan ke spreadsheet-mu.'
+        );
+        return;
+      }
+
       await handleTextMessage(fromNumber, messagingAccount.id, message.text.body, messageId, categoryNames);
     } else if (msgType === 'image') {
       await handleImageMessage(fromNumber, messagingAccount.id, message.image.id, messageId);
@@ -205,6 +256,25 @@ const result = await extractFromImage(base64, 'image/jpeg');
 // HANDLER: Tombol YA SIMPAN / EDIT / BATAL
 // =============================================================================
 const handleButtonReply = async (fromNumber: string, messagingAccountId: string, buttonId: string) => {
+  if (buttonId === 'regenerate_sheets') {
+    await WhatsAppService.sendTextMessage(fromNumber, '⏳ Sedang membuat ulang spreadsheet...');
+    try {
+      await SheetsService.regenerateSpreadsheet(messagingAccountId);
+      SheetsService.triggerFullSync(messagingAccountId);
+      await WhatsAppService.sendTextMessage(
+        fromNumber,
+        '✅ Spreadsheet berhasil dibuat ulang!\n\nSemua transaksi tahun ini, rekening, dan budget sedang disinkronkan di latar belakang.'
+      );
+    } catch (err) {
+      console.error('Error regenerating spreadsheet via WA button callback:', err);
+      await WhatsAppService.sendTextMessage(
+        fromNumber,
+        '❌ Gagal membuat ulang spreadsheet. Hubungkan kembali Google Anda.'
+      );
+    }
+    return;
+  }
+
   if (buttonId.startsWith('cetak_')) {
     const parts = buttonId.split('_');
     const month = parseInt(parts[1]);

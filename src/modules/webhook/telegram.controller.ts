@@ -175,21 +175,51 @@ const processTelegramPayload = async (payload: any) => {
       const command = textBody.trim().toLowerCase().split(/\s+/)[0];
 
       if (command === '/sync') {
-        // Check if Google is connected before attempting
         const hasMeta = await prisma.messagingAccount.findUnique({
           where: { id: messagingAccount.id },
-          select: { spreadsheetId: true }
+          select: { spreadsheetId: true, userId: true }
         });
-        if (!hasMeta?.spreadsheetId) {
-          await TelegramService.sendTextMessage(externalId,
-            '⚠️ Google Sheets belum terhubung. Silakan login ulang Google terlebih dahulu lewat aplikasi.'
-          );
+
+        let exists = false;
+        if (hasMeta?.spreadsheetId && hasMeta?.userId) {
+          try {
+            exists = await SheetsService.checkIfSpreadsheetExists(hasMeta.userId, hasMeta.spreadsheetId);
+          } catch (err) {
+            console.error('Error checking sheet existence in /sync:', err);
+          }
+        }
+
+        if (!hasMeta?.spreadsheetId || !exists) {
+          if (hasMeta?.spreadsheetId) {
+            await prisma.messagingAccount.update({
+              where: { id: messagingAccount.id },
+              data: { spreadsheetId: null }
+            });
+          }
+
+          const tokenRecord = hasMeta?.userId
+            ? await prisma.oAuthToken.findUnique({ where: { userId: hasMeta.userId } })
+            : null;
+
+          if (tokenRecord) {
+            const loginLink = `${env.BACKEND_URL ?? env.FRONTEND_URL}/v1/auth/google?tg=${externalId}`;
+            const message = `File sheets tidak ditemukan. Klik [Tautkan Ulang] untuk membuat file baru. /sync untuk menyinkronkan data`;
+            await TelegramService.sendInteractiveButtons(externalId, message, [
+              { url: loginLink, title: '🔗 Tautkan Ulang' },
+              { id: 'regenerate_sheets', title: '🖨️ Buat Ulang Spreadsheet' }
+            ]);
+          } else {
+            await TelegramService.sendTextMessage(externalId,
+              '⚠️ Google Sheets belum terhubung. Silakan login ulang Google terlebih dahulu lewat aplikasi.'
+            );
+          }
           return;
         }
+
         await TelegramService.sendTextMessage(externalId, '🔄 Memulai sinkronisasi data ke Google Sheets...');
         SheetsService.triggerFullSync(messagingAccount.id);
         await TelegramService.sendTextMessage(externalId,
-          '✅ Sinkronisasi dimulai di latar belakang!\n\nSemua transaksi, rekening, dan budget yang belum tersinkron akan muncul di spreadsheet-mu dalam beberapa saat.'
+          '✅ Sinkronisasi dimulai di latar belakang!\n\nSemua transaksi tahun ini, rekening, dan budget sedang disinkronkan ke spreadsheet-mu.'
         );
         return;
       }
@@ -242,6 +272,25 @@ const handleMenuRouter = async (
   const sessionData = activeSession?.extractedData as any;
 
   // ── Main menu options ────────────────────────────────────────────────────
+  if (buttonData === 'regenerate_sheets') {
+    await TelegramService.sendTextMessage(externalId, '⏳ Sedang membuat ulang spreadsheet...');
+    try {
+      await SheetsService.regenerateSpreadsheet(account.id);
+      SheetsService.triggerFullSync(account.id);
+      await TelegramService.sendTextMessage(
+        externalId,
+        '✅ Spreadsheet berhasil dibuat ulang!\n\nSemua transaksi tahun ini, rekening, dan budget sedang disinkronkan di latar belakang.'
+      );
+    } catch (err) {
+      console.error('Error regenerating spreadsheet via button callback:', err);
+      await TelegramService.sendTextMessage(
+        externalId,
+        '❌ Gagal membuat ulang spreadsheet. Hubungkan kembali Google Anda.'
+      );
+    }
+    return;
+  }
+
   if (buttonData === 'menu_transaksi') {
     await TelegramService.sendTextMessage(
       externalId,
