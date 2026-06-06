@@ -293,24 +293,36 @@ const handleMenuRouter = async (
     const currentMonth = today.getMonth() + 1;
     const currentYear = today.getFullYear();
 
-    const budgets = await prisma.budget.findMany({
-      where: { messagingAccountId: account.id, month: currentMonth, year: currentYear },
-      include: { category: true },
-      orderBy: { category: { name: 'asc' } }
-    });
+    // getBudgets already computes spent, remaining, and percentage for each budget
+    const budgets = await BudgetService.getBudgets(account.id);
+
+    const statusIcon = (level: string) =>
+      level === 'OVER_BUDGET' ? '🚨' : level === 'WARNING' ? '⚠️' : '🟢';
 
     const buttons = budgets.map(b => ({
       id: `budget_edit_${b.id}`,
-      title: `${b.category.name}: Rp ${Number(b.limitAmount).toLocaleString('id-ID')}`
+      title: `${statusIcon(b.status)} ${b.category.name}: ${b.percentage.toFixed(0)}% terpakai`
     }));
 
     buttons.push({ id: 'menu_budget_tambah', title: '➕ Tambah Budget Baru' });
 
-    await TelegramService.sendInteractiveButtons(
-      externalId,
-      `📊 *Atur Budget Bulanan (${MONTHS_ID[currentMonth - 1]} ${currentYear})*\n\nPilih budget di bawah untuk mengubah limit/menghapus, atau buat budget baru:`,
-      buttons
-    );
+    // Build a summary list above the buttons
+    let summaryLines = '';
+    if (budgets.length > 0) {
+      summaryLines = budgets.map(b => {
+        const icon = statusIcon(b.status);
+        const spent = b.realized.toLocaleString('id-ID');
+        const lim = b.limitAmount.toLocaleString('id-ID');
+        const rem = (b.limitAmount - b.realized).toLocaleString('id-ID');
+        return `${icon} *${b.category.name}*\n   Terpakai: Rp ${spent} / Rp ${lim} (${b.percentage.toFixed(0)}%)\n   Sisa: Rp ${rem}`;
+      }).join('\n\n');
+    }
+
+    const headerText = budgets.length > 0
+      ? `📊 *Budget Bulanan — ${MONTHS_ID[currentMonth - 1]} ${currentYear}*\n\n${summaryLines}\n\nKetuk budget untuk mengubah limit/menghapus:`
+      : `📊 *Budget Bulanan — ${MONTHS_ID[currentMonth - 1]} ${currentYear}*\n\nBelum ada budget bulan ini. Tambahkan sekarang!`;
+
+    await TelegramService.sendInteractiveButtons(externalId, headerText, buttons);
     return;
   }
 
@@ -370,6 +382,28 @@ const handleMenuRouter = async (
       return;
     }
 
+    // Compute how much has been spent this month for this category
+    const today = new Date();
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const endOfMonth   = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+    const agg = await prisma.transaction.aggregate({
+      where: {
+        messagingAccountId: account.id,
+        categoryId: budget.categoryId,
+        type: 'EXPENSE',
+        isConfirmed: true,
+        deletedAt: null,
+        transactionDate: { gte: startOfMonth, lte: endOfMonth },
+      },
+      _sum: { amount: true },
+    });
+    const spent    = Number(agg._sum.amount ?? 0);
+    const limit    = Number(budget.limitAmount);
+    const remaining = Math.max(0, limit - spent);
+    const pct      = limit > 0 ? (spent / limit) * 100 : 0;
+    const statusIcon = pct >= 100 ? '🚨' : pct >= 80 ? '⚠️' : '🟢';
+    const statusLabel = pct >= 100 ? 'TERLAMPAUI' : pct >= 80 ? 'Hampir Habis' : 'Aman';
+
     const buttons = [
       { id: `budget_change_limit_${budget.id}`, title: '✏️ Ubah Limit' },
       { id: `budget_delete_${budget.id}`, title: '🗑️ Hapus Budget' },
@@ -379,7 +413,10 @@ const handleMenuRouter = async (
     await TelegramService.sendInteractiveButtons(
       externalId,
       `📊 *Detail Budget: ${budget.category.name}*\n\n` +
-      `• Limit Bulanan: *Rp ${Number(budget.limitAmount).toLocaleString('id-ID')}*\n` +
+      `• Limit Bulanan: *Rp ${limit.toLocaleString('id-ID')}*\n` +
+      `• Terpakai: *Rp ${spent.toLocaleString('id-ID')}* (${pct.toFixed(0)}%)\n` +
+      `• Sisa: *Rp ${remaining.toLocaleString('id-ID')}*\n` +
+      `• Status: ${statusIcon} *${statusLabel}*\n` +
       `• Bulan/Tahun: *${MONTHS_ID[budget.month - 1]} ${budget.year}*\n` +
       `• Catatan: _${budget.notes || '-'}_`,
       buttons
