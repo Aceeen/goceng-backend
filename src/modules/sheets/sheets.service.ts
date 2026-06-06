@@ -1,6 +1,6 @@
 import { sheetsAPI, oauth2Client } from '../../config/googleClient';
 import { prisma } from '../../config/prisma';
-import { decryptToken } from '../../utils/encryption';
+import { decryptToken, encryptToken } from '../../utils/encryption';
 import { env } from '../../config/env';
 
 /**
@@ -8,7 +8,15 @@ import { env } from '../../config/env';
  */
 export class SheetsService {
   /**
-   * Sets up oauth credentials for a specific user to perform Sheet operations.
+   * Sets up oauth credentials for a specific user and automatically persists
+   * any refreshed access tokens back to the database via the googleapis
+   * 'tokens' event listener.
+   *
+   * The googleapis library automatically refreshes the access token whenever it
+   * is within its expiry window. Without persisting the new token, the database
+   * always holds a stale access token. On the next cold start, the library
+   * submits the stale token and must re-refresh it again — eventually causing
+   * issues with token rotation limits or producing invalid_grant errors.
    */
   private static async authenticateUser(userId: string) {
     const tokenRecord = await prisma.oAuthToken.findUnique({ where: { userId } });
@@ -16,14 +24,66 @@ export class SheetsService {
       throw new Error(`No OAuth token found for user ${userId}`);
     }
 
-    // Decrypt the token that was securely saved
+    // Decrypt stored tokens
     const accessToken = decryptToken(tokenRecord.accessToken);
     const refreshToken = decryptToken(tokenRecord.refreshToken);
+
+    // Remove any previously attached listeners to avoid duplicate DB writes
+    // across repeated authenticateUser calls within the same process lifetime.
+    oauth2Client.removeAllListeners('tokens');
+
+    // Persist any newly issued access token back to the database.
+    // This fires automatically whenever the googleapis library silently refreshes
+    // the access token (which happens when the current one is within 5 minutes of
+    // expiry or has already expired).
+    oauth2Client.on('tokens', async (newTokens) => {
+      try {
+        if (newTokens.access_token) {
+          const encryptedAccess = encryptToken(newTokens.access_token);
+          const tokenExpiry = newTokens.expiry_date
+            ? new Date(newTokens.expiry_date)
+            : new Date(Date.now() + 3600 * 1000);
+
+          await prisma.oAuthToken.update({
+            where: { userId },
+            data: {
+              accessToken: encryptedAccess,
+              expiresAt: tokenExpiry,
+              // Only update refreshToken if Google issued a new one (rare — only
+              // happens on the very first token or after revocation + re-auth)
+              ...(newTokens.refresh_token
+                ? { refreshToken: encryptToken(newTokens.refresh_token) }
+                : {}),
+            },
+          });
+          console.log(`[Sheets] Persisted refreshed access token for user ${userId}`);
+        }
+      } catch (err) {
+        console.error(`[Sheets] Failed to persist refreshed token for user ${userId}:`, err);
+      }
+    });
 
     oauth2Client.setCredentials({
       access_token: accessToken,
       refresh_token: refreshToken,
+      expiry_date: tokenRecord.expiresAt.getTime(),
     });
+
+    // Proactively refresh if the stored access token expires within the next
+    // 5 minutes. This avoids a mid-request refresh that could add latency to
+    // the first Sheets API call after a long idle period.
+    const fiveMinutesFromNow = Date.now() + 5 * 60 * 1000;
+    if (tokenRecord.expiresAt.getTime() < fiveMinutesFromNow) {
+      console.log(`[Sheets] Access token near expiry for user ${userId} — proactively refreshing...`);
+      try {
+        await oauth2Client.refreshAccessToken();
+        // The 'tokens' event listener above will persist the new token to DB.
+      } catch (err) {
+        // If this fails, the subsequent API call will still attempt its own
+        // refresh. Log and continue rather than blocking the operation.
+        console.warn(`[Sheets] Proactive refresh failed for user ${userId}:`, err);
+      }
+    }
   }
 
   /**
