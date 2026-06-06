@@ -268,7 +268,7 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
         }
       }
 
-      const { account, budgetWarning } = await saveConfirmedTransaction(messagingAccountId, data, imageUrl);
+      const { account, budgetInfo } = await saveConfirmedTransaction(messagingAccountId, data, imageUrl);
 
       await updateSessionStatus(session.id, 'SAVED');
 
@@ -292,10 +292,19 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
         `• 🏦 Rekening: ${account?.name ?? '-'}\n\n` +
         `💰 *Sisa saldo ${account?.name ?? 'rekening'}: Rp ${saldo}*`;
 
-      if (budgetWarning) {
-        const spent = budgetWarning.currentSpent.toLocaleString('id-ID');
-        const lim = budgetWarning.limitAmount.toLocaleString('id-ID');
-        msg += `\n\n⚠️ *PERINGATAN BUDGET bulanan ${budgetWarning.categoryName}*!\nPengeluaran telah mencapai *Rp ${spent}* dari limit *Rp ${lim}*!`;
+      if (budgetInfo) {
+        const spent = budgetInfo.currentSpent.toLocaleString('id-ID');
+        const lim = budgetInfo.limitAmount.toLocaleString('id-ID');
+        const remaining = budgetInfo.remaining.toLocaleString('id-ID');
+        const pct = budgetInfo.percentage.toFixed(0);
+
+        if (budgetInfo.warningLevel === 'EXCEEDED') {
+          msg += `\n\n🚨 *Budget ${budgetInfo.categoryName} TERLAMPAUI!*\nTerpakai: Rp ${spent} dari Rp ${lim} (${pct}%)`;
+        } else if (budgetInfo.warningLevel === 'WARNING') {
+          msg += `\n\n⚠️ *Budget ${budgetInfo.categoryName} hampir habis!*\nTerpakai: Rp ${spent} dari Rp ${lim} (${pct}%)\nSisa: *Rp ${remaining}*`;
+        } else {
+          msg += `\n\n📊 *Budget ${budgetInfo.categoryName}:* Rp ${spent} / Rp ${lim} (${pct}%)\nSisa: *Rp ${remaining}*`;
+        }
       }
 
       await WhatsAppService.sendTextMessage(fromNumber, msg);

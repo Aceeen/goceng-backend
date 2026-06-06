@@ -215,7 +215,17 @@ if (spreadsheetId) {
   });
 }
 
-  let budgetWarning = null;
+  // Budget info — always returned when the category has an active monthly budget,
+  // regardless of whether the limit has been reached.
+  let budgetInfo: {
+    categoryName: string;
+    limitAmount: number;
+    currentSpent: number;
+    remaining: number;
+    percentage: number;
+    warningLevel: 'OK' | 'WARNING' | 'EXCEEDED';
+  } | null = null;
+
   if (transaction.type === 'EXPENSE' && transaction.categoryId) {
     try {
       const txDate = transaction.transactionDate;
@@ -231,6 +241,7 @@ if (spreadsheetId) {
             year,
           },
         },
+        include: { category: { select: { name: true } } },
       });
 
       if (budget) {
@@ -244,42 +255,39 @@ if (spreadsheetId) {
             type: 'EXPENSE',
             isConfirmed: true,
             deletedAt: null,
-            transactionDate: {
-              gte: startOfMonth,
-              lte: endOfMonth,
-            },
+            transactionDate: { gte: startOfMonth, lte: endOfMonth },
           },
-          _sum: {
-            amount: true,
-          },
+          _sum: { amount: true },
         });
 
         const currentSpent = Number(totalExpense._sum.amount ?? 0);
         const limit = Number(budget.limitAmount);
+        const remaining = Math.max(0, limit - currentSpent);
+        const percentage = limit > 0 ? (currentSpent / limit) * 100 : 0;
 
-        if (currentSpent >= limit) {
-          const cat = await prisma.category.findUnique({
-            where: { id: transaction.categoryId },
-            select: { name: true },
-          });
+        let warningLevel: 'OK' | 'WARNING' | 'EXCEEDED' = 'OK';
+        if (currentSpent >= limit) warningLevel = 'EXCEEDED';
+        else if (percentage >= 80) warningLevel = 'WARNING';
 
-          budgetWarning = {
-            categoryName: cat?.name ?? 'Kategori',
-            limitAmount: limit,
-            currentSpent,
-            isExceeded: currentSpent > limit,
-          };
-        }
+        budgetInfo = {
+          categoryName: budget.category.name,
+          limitAmount: limit,
+          currentSpent,
+          remaining,
+          percentage,
+          warningLevel,
+        };
       }
     } catch (budgetErr) {
-      console.error('[Budget Warning] Failed to check budget limit:', budgetErr);
+      console.error('[Budget] Failed to check budget:', budgetErr);
     }
   }
 
   return {
     transaction,
     account: updatedAccount,
-    budgetWarning,
+    budgetWarning: budgetInfo, // keep field name for backward compat
+    budgetInfo,
   };
 }
 
