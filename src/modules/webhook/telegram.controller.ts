@@ -18,6 +18,8 @@ const BTN_CONFIRM = 'btn_confirm';
 const BTN_EDIT    = 'btn_edit';
 const BTN_CANCEL  = 'btn_cancel';
 
+const activePrintLocks = new Set<string>();
+
 const MONTHS_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 
 const USAGE_INSTRUCTIONS =
@@ -503,6 +505,12 @@ const handleMenuRouter = async (
     const year = parseInt(parts[2]);
     const sheetName = MONTHS_ID[month - 1];
 
+    if (activePrintLocks.has(account.id)) {
+      console.warn(`[Cetak] Duplicate print request (in-memory lock) ignored for user ${account.id}`);
+      return;
+    }
+    activePrintLocks.add(account.id);
+
     // Check for transaction existence in that specific month and year
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59, 999);
@@ -517,44 +525,47 @@ const handleMenuRouter = async (
     });
 
     if (txCount === 0) {
+      activePrintLocks.delete(account.id);
       await TelegramService.sendTextMessage(externalId, `❌ Tidak ada transaksi pada bulan *${sheetName} ${year}*. Laporan tidak dapat dicetak.`);
       return;
     }
 
-    // Check if there is already a printing session in progress to prevent spam clicks
-    const activeSessions = await prisma.transactionSession.findMany({
+    // Clean up any expired print locks first
+    await prisma.transactionSession.deleteMany({
       where: {
         messagingAccountId: account.id,
-        status: 'PENDING',
-        expiresAt: { gt: new Date() }
+        externalMessageId: `PRINT_${account.id}`,
+        expiresAt: { lte: new Date() }
       }
-    });
+    }).catch(() => {});
 
-    const isPrinting = activeSessions.some(s => {
-      const data = s.extractedData as any;
-      return data?.type === 'PRINTING';
-    });
-
-    if (isPrinting) {
-      console.warn(`[Cetak] Duplicate print request ignored for user ${account.id}`);
-      return;
+    // Create printing session lock using unique constraint on externalMessageId
+    let printSession;
+    try {
+      printSession = await prisma.transactionSession.create({
+        data: {
+          messagingAccountId: account.id,
+          platform: 'TELEGRAM',
+          status: 'PENDING',
+          externalMessageId: `PRINT_${account.id}`,
+          extractedData: { type: 'PRINTING', month, year },
+          rawPayload: {},
+          expiresAt: new Date(Date.now() + 15000) // 15 seconds lock
+        }
+      });
+    } catch (err: any) {
+      activePrintLocks.delete(account.id);
+      if (err.code === 'P2002') {
+        console.warn(`[Cetak] Duplicate print request (DB constraint lock) ignored for user ${account.id}`);
+        return;
+      }
+      throw err;
     }
-
-    // Create printing session lock
-    const printSession = await prisma.transactionSession.create({
-      data: {
-        messagingAccountId: account.id,
-        platform: 'TELEGRAM',
-        status: 'PENDING',
-        extractedData: { type: 'PRINTING', month, year },
-        rawPayload: {},
-        expiresAt: new Date(Date.now() + 15000) // 15 seconds lock
-      }
-    });
 
     await TelegramService.sendTextMessage(externalId, `⏳ Sedang mencetak *${sheetName}*...`);
 
     if (!account.spreadsheetId) {
+      activePrintLocks.delete(account.id);
       await TelegramService.sendTextMessage(externalId, '❌ Google Sheet belum terhubung.');
       await prisma.transactionSession.delete({ where: { id: printSession.id } }).catch(() => {});
       return;
@@ -572,7 +583,10 @@ const handleMenuRouter = async (
       console.error('Failed to export and send PDF to Telegram:', err);
       await TelegramService.sendTextMessage(externalId, '❌ Gagal mencetak laporan PDF.');
     } finally {
-      await prisma.transactionSession.delete({ where: { id: printSession.id } }).catch(() => {});
+      activePrintLocks.delete(account.id);
+      if (printSession) {
+        await prisma.transactionSession.delete({ where: { id: printSession.id } }).catch(() => {});
+      }
     }
     return;
   }

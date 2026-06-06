@@ -29,6 +29,8 @@ const BTN_CONFIRM = 'btn_confirm';
 const BTN_EDIT    = 'btn_edit';
 const BTN_CANCEL  = 'btn_cancel';
 
+const activePrintLocks = new Set<string>();
+
 // =============================================================================
 // VERIFY ENDPOINT
 // =============================================================================
@@ -281,6 +283,12 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
     const MONTHS_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     const sheetName = MONTHS_ID[month - 1];
 
+    if (activePrintLocks.has(messagingAccountId)) {
+      console.warn(`[Cetak] Duplicate print request (in-memory lock) ignored for user ${messagingAccountId}`);
+      return;
+    }
+    activePrintLocks.add(messagingAccountId);
+
     // Check for transaction existence in that specific month and year
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59, 999);
@@ -295,40 +303,42 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
     });
 
     if (txCount === 0) {
+      activePrintLocks.delete(messagingAccountId);
       await WhatsAppService.sendTextMessage(fromNumber, `❌ Tidak ada transaksi pada bulan *${sheetName} ${year}*. Laporan tidak dapat dicetak.`);
       return;
     }
 
-    // Check if there is already a printing session in progress to prevent spam clicks
-    const activeSessions = await prisma.transactionSession.findMany({
+    // Clean up any expired print locks first
+    await prisma.transactionSession.deleteMany({
       where: {
         messagingAccountId,
-        status: 'PENDING',
-        expiresAt: { gt: new Date() }
+        externalMessageId: `PRINT_${messagingAccountId}`,
+        expiresAt: { lte: new Date() }
       }
-    });
+    }).catch(() => {});
 
-    const isPrinting = activeSessions.some(s => {
-      const data = s.extractedData as any;
-      return data?.type === 'PRINTING';
-    });
-
-    if (isPrinting) {
-      console.warn(`[Cetak] Duplicate print request ignored for user ${messagingAccountId}`);
-      return;
+    // Create printing session lock using unique constraint on externalMessageId
+    let printSession;
+    try {
+      printSession = await prisma.transactionSession.create({
+        data: {
+          messagingAccountId,
+          platform: 'WHATSAPP',
+          status: 'PENDING',
+          externalMessageId: `PRINT_${messagingAccountId}`,
+          extractedData: { type: 'PRINTING', month, year },
+          rawPayload: {},
+          expiresAt: new Date(Date.now() + 15000) // 15 seconds lock
+        }
+      });
+    } catch (err: any) {
+      activePrintLocks.delete(messagingAccountId);
+      if (err.code === 'P2002') {
+        console.warn(`[Cetak] Duplicate print request (DB constraint lock) ignored for user ${messagingAccountId}`);
+        return;
+      }
+      throw err;
     }
-
-    // Create printing session lock
-    const printSession = await prisma.transactionSession.create({
-      data: {
-        messagingAccountId,
-        platform: 'WHATSAPP',
-        status: 'PENDING',
-        extractedData: { type: 'PRINTING', month, year },
-        rawPayload: {},
-        expiresAt: new Date(Date.now() + 15000) // 15 seconds lock
-      }
-    });
 
     await WhatsAppService.sendTextMessage(fromNumber, `⏳ Sedang mencetak laporan *${sheetName}*...`);
 
@@ -337,6 +347,7 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
     });
 
     if (!account?.spreadsheetId) {
+      activePrintLocks.delete(messagingAccountId);
       await WhatsAppService.sendTextMessage(fromNumber, '❌ Google Sheet belum terhubung.');
       await prisma.transactionSession.delete({ where: { id: printSession.id } }).catch(() => {});
       return;
@@ -354,7 +365,10 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
       console.error('Failed to export and send PDF to WhatsApp:', error);
       await WhatsAppService.sendTextMessage(fromNumber, '❌ Gagal mencetak laporan PDF.');
     } finally {
-      await prisma.transactionSession.delete({ where: { id: printSession.id } }).catch(() => {});
+      activePrintLocks.delete(messagingAccountId);
+      if (printSession) {
+        await prisma.transactionSession.delete({ where: { id: printSession.id } }).catch(() => {});
+      }
     }
     return;
   }

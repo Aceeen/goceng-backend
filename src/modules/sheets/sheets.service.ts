@@ -117,7 +117,7 @@ export class SheetsService {
         transaction.account?.name || '',
         transaction.source,
         transaction.currentBalance, // balance after transaction
-        transaction.imageUrl || '',
+        transaction.imageUrl ? `=HYPERLINK("${transaction.imageUrl}", "Lihat Foto")` : '',
         new Date().toISOString() // Or custom DD/MM/YYYY HH:mm formatted string
       ],
     ];
@@ -339,7 +339,7 @@ export class SheetsService {
         },
         include: {
           category: { select: { name: true } },
-          account: { select: { name: true } },
+          account: { select: { name: true, currentBalance: true } },
         },
         orderBy: { transactionDate: 'asc' },
       });
@@ -356,7 +356,7 @@ export class SheetsService {
           tx.account?.name || '',
           tx.source,
           Number(tx.account?.currentBalance ?? 0),
-          tx.imageUrl || '',
+          tx.imageUrl ? `=HYPERLINK("${tx.imageUrl}", "Lihat Foto")` : '',
           tx.createdAt.toISOString()
         ]);
 
