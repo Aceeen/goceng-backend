@@ -162,13 +162,7 @@ const processTelegramPayload = async (payload: any) => {
       where: {
         OR: [
           { isSystem: true },
-          {
-            transactions: {
-              some: {
-                messagingAccountId: messagingAccount.id
-              }
-            }
-          }
+          { messagingAccountId: messagingAccount.id }
         ]
       },
       select: { name: true },
@@ -337,13 +331,7 @@ const handleMenuRouter = async (
       where: {
         OR: [
           { isSystem: true },
-          {
-            transactions: {
-              some: {
-                messagingAccountId: account.id
-              }
-            }
-          }
+          { messagingAccountId: account.id }
         ]
       },
       orderBy: { name: 'asc' }

@@ -43,6 +43,7 @@ model MessagingAccount {
   budgets             Budget[]
   routineExpenses     RoutineExpense[]
   transactionSessions TransactionSession[]
+  categories          Category[]
 
   @@unique([platform, externalId])
   @@map("messaging_accounts")
@@ -94,17 +95,21 @@ enum AccountType {
 }  
   
 model Category {  
-  id           String       @id @default(cuid())  
-  name         String       @unique  
-  icon         String?  
-  color        String?  
-  type         CategoryType  
-  isSystem     Boolean      @default(false) @map("is_system")  
-  keywords     String[]  
-  createdAt    DateTime     @default(now()) @map("created_at")  
-  transactions Transaction[]  
-  budgets      Budget[]  
-  routineExpenses RoutineExpense[]
+  id                 String            @id @default(cuid())  
+  messagingAccountId String?           @map("messaging_account_id")
+  name               String  
+  icon               String?  
+  color              String?  
+  type               CategoryType  
+  isSystem           Boolean           @default(false) @map("is_system")  
+  keywords           String[]  
+  createdAt          DateTime          @default(now()) @map("created_at")  
+  transactions       Transaction[]  
+  budgets            Budget[]  
+  routineExpenses    RoutineExpense[]
+  messagingAccount   MessagingAccount? @relation(fields: [messagingAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([name, messagingAccountId])
   @@map("categories")  
 } 
 
@@ -135,7 +140,7 @@ model Transaction {
   updatedAt          DateTime          @updatedAt @map("updated_at")  
   messagingAccount   MessagingAccount  @relation(fields: [messagingAccountId], references: [id], onDelete: Cascade)  
   account            Account           @relation(fields: [accountId], references: [id])  
-  category           Category?         @relation(fields: [categoryId], references: [id])  
+  category           Category?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)  
   items              TransactionItem[]  
   
   @@index([messagingAccountId, transactionDate])  
@@ -181,7 +186,7 @@ model Budget {
   createdAt          DateTime         @default(now()) @map("created_at")  
   updatedAt          DateTime         @updatedAt @map("updated_at")  
   messagingAccount   MessagingAccount @relation(fields: [messagingAccountId], references: [id], onDelete: Cascade)  
-  category           Category         @relation(fields: [categoryId], references: [id])  
+  category           Category         @relation(fields: [categoryId], references: [id], onDelete: Cascade)  
   
   @@unique([messagingAccountId, categoryId, month, year])  
   @@map("budgets")  
@@ -204,7 +209,7 @@ model RoutineExpense {
 
   messagingAccount   MessagingAccount @relation(fields: [messagingAccountId], references: [id], onDelete: Cascade)
   account            Account          @relation(fields: [accountId], references: [id])
-  category           Category?        @relation(fields: [categoryId], references: [id])
+  category           Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   @@index([messagingAccountId, isActive])
   @@map("routine_expenses")

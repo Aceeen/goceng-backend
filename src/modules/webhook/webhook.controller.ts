@@ -86,13 +86,7 @@ const processAsyncPayload = async (payload: any) => {
       where: {
         OR: [
           { isSystem: true },
-          {
-            transactions: {
-              some: {
-                messagingAccountId: messagingAccount.id
-              }
-            }
-          }
+          { messagingAccountId: messagingAccount.id }
         ]
       },
       select: { name: true },

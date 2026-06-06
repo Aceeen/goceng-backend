@@ -84,7 +84,11 @@ export async function saveConfirmedTransaction(
         name: {
           equals: data.suggestedCategory,
           mode: 'insensitive'
-        }
+        },
+        OR: [
+          { isSystem: true },
+          { messagingAccountId }
+        ]
       },
     });
 
@@ -93,7 +97,8 @@ export async function saveConfirmedTransaction(
       category = await prisma.category.create({
         data: {
           name: data.suggestedCategory,
-          type: transactionType
+          type: transactionType,
+          messagingAccountId
         },
       });
     }

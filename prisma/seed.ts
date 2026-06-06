@@ -31,11 +31,26 @@ async function main() {
   ];
 
   for (const cat of categories) {
-    await prisma.category.upsert({ 
-      where: { name: cat.name }, 
-      update: cat, 
-      create: cat 
+    const existing = await prisma.category.findFirst({
+      where: { name: cat.name, isSystem: true }
     });
+
+    if (existing) {
+      await prisma.category.update({
+        where: { id: existing.id },
+        data: {
+          ...cat,
+          messagingAccountId: null as any
+        }
+      });
+    } else {
+      await prisma.category.create({
+        data: {
+          ...cat,
+          messagingAccountId: null as any
+        }
+      });
+    }
   }
   console.log('Seed selesai: 13 kategori sistem berhasil di-insert.');
 }
