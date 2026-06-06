@@ -93,6 +93,16 @@ export class SheetsService {
   static async appendTransaction(userId: string, spreadsheetId: string, transaction: any) {
     await this.authenticateUser(userId);
 
+    const exists = await this.checkIfSpreadsheetExists(userId, spreadsheetId);
+    if (!exists) {
+      const error = new Error('Spreadsheet not found (deleted or trashed).');
+      (error as any).code = 404;
+      if (transaction?.messagingAccountId) {
+        await this.handleOAuthError(error, transaction.messagingAccountId);
+      }
+      throw error;
+    }
+
     // Prepare values according to technical document "3.5.1 Sheet: TRANSACTIONS"
     // ID, Tanggal, Tipe, Jumlah, Kategori, Deskripsi, Merchant, Rekening, Sumber, Saldo Setelah, Foto Struk, Dicatat Pada
     const values = [
@@ -144,6 +154,13 @@ export class SheetsService {
 
     try {
       await this.authenticateUser(userId);
+      const exists = await this.checkIfSpreadsheetExists(userId, spreadsheetId);
+      if (!exists) {
+        const error = new Error('Spreadsheet not found (deleted or trashed).');
+        (error as any).code = 404;
+        await this.handleOAuthError(error, messagingAccountId);
+        throw error;
+      }
       let sheetName = 'ACCOUNTS';
       try {
         await sheetsAPI.spreadsheets.values.clear({
@@ -219,6 +236,13 @@ export class SheetsService {
 
     try {
       await this.authenticateUser(userId);
+      const exists = await this.checkIfSpreadsheetExists(userId, spreadsheetId);
+      if (!exists) {
+        const error = new Error('Spreadsheet not found (deleted or trashed).');
+        (error as any).code = 404;
+        await this.handleOAuthError(error, messagingAccountId);
+        throw error;
+      }
       let sheetName = 'BUDGETS';
       try {
         await sheetsAPI.spreadsheets.values.clear({
@@ -366,10 +390,14 @@ export class SheetsService {
   static async checkIfSpreadsheetExists(userId: string, spreadsheetId: string): Promise<boolean> {
     try {
       await this.authenticateUser(userId);
-      await sheetsAPI.spreadsheets.get({
-        spreadsheetId,
-        fields: 'spreadsheetId'
+      const driveAPI = google.drive({ version: 'v3', auth: oauth2Client });
+      const fileRes = await driveAPI.files.get({
+        fileId: spreadsheetId,
+        fields: 'id, trashed'
       });
+      if (fileRes.data.trashed) {
+        return false;
+      }
       return true;
     } catch (err: any) {
       const errStr = String(err.message || err);
