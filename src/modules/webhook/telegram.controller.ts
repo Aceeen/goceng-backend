@@ -230,6 +230,7 @@ const sendMainMenu = async (externalId: string, preamble?: string) => {
     { id: 'menu_rutin',     title: '📅 Pengeluaran Rutin' },
     { id: 'menu_budget',    title: '📊 Atur Budget' },
     { id: 'menu_cetak',     title: '🖨️ Cetak Laporan (SPS)' },
+    { url: env.FRONTEND_URL, title: '🌐 Buka Web App' },
   ]);
 };
 

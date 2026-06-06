@@ -31,16 +31,23 @@ export class TelegramService {
 
   /**
    * Send an interactive message with Inline Keyboard buttons.
+   * Each button is either:
+   *  - a callback button: { id: string; title: string }
+   *  - a URL button:      { url: string; title: string }   ← opens a link
    */
   static async sendInteractiveButtons(
     chatId: string,
     text: string,
-    buttons: { id: string; title: string }[]
+    buttons: ({ id: string; title: string } | { url: string; title: string })[]
   ): Promise<boolean> {
     if (!env.TELEGRAM_BOT_TOKEN) return false;
 
     // Telegram: one button per row for readability
-    const inlineKeyboard = buttons.map((btn) => [{ text: btn.title, callback_data: btn.id }]);
+    const inlineKeyboard = buttons.map((btn) => [
+      'url' in btn
+        ? { text: btn.title, url: btn.url }
+        : { text: btn.title, callback_data: btn.id },
+    ]);
 
     try {
       const response = await fetch(`${this.apiUrl}/sendMessage`, {
