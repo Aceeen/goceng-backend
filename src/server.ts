@@ -1,3 +1,6 @@
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
+
 import app from './app';
 import { env } from './config/env';
 import { prisma } from './config/prisma';
