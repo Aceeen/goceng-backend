@@ -562,12 +562,11 @@ export class SheetsService {
             : `${env.FRONTEND_URL}/login?platform=WHATSAPP&id=${externalId}`;
 
           const message = `⚠️ *File Google Sheets Tidak Ditemukan!*\n\n` +
-            `File sheets tidak ditemukan. Klik [Tautkan Ulang] untuk membuat file baru. /sync untuk menyinkronkan data`;
+            `File sheets tidak ditemukan. Klik tombol di bawah untuk membuat file baru secara otomatis. /sync untuk menyinkronkan data`;
 
           if (platform === 'TELEGRAM') {
             const { TelegramService } = await import('../webhook/telegram.service');
             await TelegramService.sendInteractiveButtons(externalId, message, [
-              { url: loginLink, title: '🔗 Tautkan Ulang' },
               { id: 'regenerate_sheets', title: '🖨️ Buat Ulang Spreadsheet' }
             ]);
           } else {

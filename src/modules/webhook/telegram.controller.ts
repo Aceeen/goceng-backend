@@ -202,10 +202,8 @@ const processTelegramPayload = async (payload: any) => {
             : null;
 
           if (tokenRecord) {
-            const loginLink = `${env.BACKEND_URL ?? env.FRONTEND_URL}/v1/auth/google?tg=${externalId}`;
-            const message = `File sheets tidak ditemukan. Klik [Tautkan Ulang] untuk membuat file baru. /sync untuk menyinkronkan data`;
+            const message = `File sheets tidak ditemukan. Klik tombol di bawah untuk membuat file baru secara otomatis. /sync untuk menyinkronkan data`;
             await TelegramService.sendInteractiveButtons(externalId, message, [
-              { url: loginLink, title: '🔗 Tautkan Ulang' },
               { id: 'regenerate_sheets', title: '🖨️ Buat Ulang Spreadsheet' }
             ]);
           } else {
@@ -505,20 +503,77 @@ const handleMenuRouter = async (
     const year = parseInt(parts[2]);
     const sheetName = MONTHS_ID[month - 1];
 
+    // Check for transaction existence in that specific month and year
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+
+    const txCount = await prisma.transaction.count({
+      where: {
+        messagingAccountId: account.id,
+        isConfirmed: true,
+        deletedAt: null,
+        transactionDate: { gte: startDate, lte: endDate }
+      }
+    });
+
+    if (txCount === 0) {
+      await TelegramService.sendTextMessage(externalId, `❌ Tidak ada transaksi pada bulan *${sheetName} ${year}*. Laporan tidak dapat dicetak.`);
+      return;
+    }
+
+    // Check if there is already a printing session in progress to prevent spam clicks
+    const activeSessions = await prisma.transactionSession.findMany({
+      where: {
+        messagingAccountId: account.id,
+        status: 'PENDING',
+        expiresAt: { gt: new Date() }
+      }
+    });
+
+    const isPrinting = activeSessions.some(s => {
+      const data = s.extractedData as any;
+      return data?.type === 'PRINTING';
+    });
+
+    if (isPrinting) {
+      console.warn(`[Cetak] Duplicate print request ignored for user ${account.id}`);
+      return;
+    }
+
+    // Create printing session lock
+    const printSession = await prisma.transactionSession.create({
+      data: {
+        messagingAccountId: account.id,
+        platform: 'TELEGRAM',
+        status: 'PENDING',
+        extractedData: { type: 'PRINTING', month, year },
+        rawPayload: {},
+        expiresAt: new Date(Date.now() + 15000) // 15 seconds lock
+      }
+    });
+
     await TelegramService.sendTextMessage(externalId, `⏳ Sedang mencetak *${sheetName}*...`);
 
     if (!account.spreadsheetId) {
       await TelegramService.sendTextMessage(externalId, '❌ Google Sheet belum terhubung.');
+      await prisma.transactionSession.delete({ where: { id: printSession.id } }).catch(() => {});
       return;
     }
 
-    const pdfBuffer = await DriveService.exportSheetByName(account.userId, account.spreadsheetId, sheetName);
-    if (!pdfBuffer) {
-      await TelegramService.sendTextMessage(externalId, `❌ Tab *${sheetName}* tidak ditemukan di spreadsheet.`);
-      return;
-    }
+    try {
+      const pdfBuffer = await DriveService.exportSheetByName(account.userId, account.spreadsheetId, sheetName);
+      if (!pdfBuffer) {
+        await TelegramService.sendTextMessage(externalId, `❌ Tab *${sheetName}* tidak ditemukan di spreadsheet.`);
+        return;
+      }
 
-    await TelegramService.sendDocument(externalId, pdfBuffer, `GOCENG_${sheetName}.pdf`);
+      await TelegramService.sendDocument(externalId, pdfBuffer, `GOCENG_${sheetName}.pdf`);
+    } catch (err) {
+      console.error('Failed to export and send PDF to Telegram:', err);
+      await TelegramService.sendTextMessage(externalId, '❌ Gagal mencetak laporan PDF.');
+    } finally {
+      await prisma.transactionSession.delete({ where: { id: printSession.id } }).catch(() => {});
+    }
     return;
   }
 

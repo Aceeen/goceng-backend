@@ -142,8 +142,7 @@ const processAsyncPayload = async (payload: any) => {
             : null;
 
           if (tokenRecord) {
-            const loginLink = `${env.FRONTEND_URL}/login?platform=WHATSAPP&id=${fromNumber}`;
-            const messageText = `File sheets tidak ditemukan. Klik [Tautkan Ulang] untuk membuat file baru. /sync untuk menyinkronkan data\n\nLink: ${loginLink}`;
+            const messageText = `File sheets tidak ditemukan. Klik tombol di bawah untuk membuat file baru secara otomatis. /sync untuk menyinkronkan data`;
             await WhatsAppService.sendInteractiveButtons(fromNumber, messageText, [
               { id: 'regenerate_sheets', title: 'Buat Ulang Sheet' }
             ]);
@@ -282,6 +281,55 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
     const MONTHS_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     const sheetName = MONTHS_ID[month - 1];
 
+    // Check for transaction existence in that specific month and year
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+
+    const txCount = await prisma.transaction.count({
+      where: {
+        messagingAccountId,
+        isConfirmed: true,
+        deletedAt: null,
+        transactionDate: { gte: startDate, lte: endDate }
+      }
+    });
+
+    if (txCount === 0) {
+      await WhatsAppService.sendTextMessage(fromNumber, `❌ Tidak ada transaksi pada bulan *${sheetName} ${year}*. Laporan tidak dapat dicetak.`);
+      return;
+    }
+
+    // Check if there is already a printing session in progress to prevent spam clicks
+    const activeSessions = await prisma.transactionSession.findMany({
+      where: {
+        messagingAccountId,
+        status: 'PENDING',
+        expiresAt: { gt: new Date() }
+      }
+    });
+
+    const isPrinting = activeSessions.some(s => {
+      const data = s.extractedData as any;
+      return data?.type === 'PRINTING';
+    });
+
+    if (isPrinting) {
+      console.warn(`[Cetak] Duplicate print request ignored for user ${messagingAccountId}`);
+      return;
+    }
+
+    // Create printing session lock
+    const printSession = await prisma.transactionSession.create({
+      data: {
+        messagingAccountId,
+        platform: 'WHATSAPP',
+        status: 'PENDING',
+        extractedData: { type: 'PRINTING', month, year },
+        rawPayload: {},
+        expiresAt: new Date(Date.now() + 15000) // 15 seconds lock
+      }
+    });
+
     await WhatsAppService.sendTextMessage(fromNumber, `⏳ Sedang mencetak laporan *${sheetName}*...`);
 
     const account = await prisma.messagingAccount.findUnique({
@@ -290,6 +338,7 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
 
     if (!account?.spreadsheetId) {
       await WhatsAppService.sendTextMessage(fromNumber, '❌ Google Sheet belum terhubung.');
+      await prisma.transactionSession.delete({ where: { id: printSession.id } }).catch(() => {});
       return;
     }
 
@@ -304,6 +353,8 @@ const handleButtonReply = async (fromNumber: string, messagingAccountId: string,
     } catch (error) {
       console.error('Failed to export and send PDF to WhatsApp:', error);
       await WhatsAppService.sendTextMessage(fromNumber, '❌ Gagal mencetak laporan PDF.');
+    } finally {
+      await prisma.transactionSession.delete({ where: { id: printSession.id } }).catch(() => {});
     }
     return;
   }
