@@ -1,10 +1,11 @@
 import { driveAPI, oauth2Client, sheetsAPI } from '../../config/googleClient';
 import { prisma } from '../../config/prisma';
-import { decryptToken } from '../../utils/encryption';
+import { decryptToken, encryptToken } from '../../utils/encryption';
 
 export class DriveService {
   /**
    * Sets up oauth credentials using the user's decrypted DB tokens
+   * and automatically refreshes and persists them to the database.
    */
   private static async authenticateUser(userId: string) {
     const tokenRecord = await prisma.oAuthToken.findUnique({ where: { userId } });
@@ -15,10 +16,58 @@ export class DriveService {
     const accessToken = decryptToken(tokenRecord.accessToken);
     const refreshToken = decryptToken(tokenRecord.refreshToken);
 
+    // Remove any previously attached listeners to avoid duplicate DB writes
+    // across repeated authenticateUser calls within the same process lifetime.
+    oauth2Client.removeAllListeners('tokens');
+
+    // Persist any newly issued access token back to the database.
+    // This fires automatically whenever the googleapis library silently refreshes
+    // the access token.
+    oauth2Client.on('tokens', async (newTokens) => {
+      try {
+        if (newTokens.access_token) {
+          const encryptedAccess = encryptToken(newTokens.access_token);
+          const tokenExpiry = newTokens.expiry_date
+            ? new Date(newTokens.expiry_date)
+            : new Date(Date.now() + 3600 * 1000);
+
+          await prisma.oAuthToken.update({
+            where: { userId },
+            data: {
+              accessToken: encryptedAccess,
+              expiresAt: tokenExpiry,
+              // Only update refreshToken if Google issued a new one
+              ...(newTokens.refresh_token
+                ? { refreshToken: encryptToken(newTokens.refresh_token) }
+                : {}),
+            },
+          });
+          console.log(`[Drive] Persisted refreshed access token for user ${userId}`);
+        }
+      } catch (err) {
+        console.error(`[Drive] Failed to persist refreshed token for user ${userId}:`, err);
+      }
+    });
+
     oauth2Client.setCredentials({
       access_token: accessToken,
       refresh_token: refreshToken,
+      expiry_date: tokenRecord.expiresAt.getTime(),
     });
+
+    // Proactively refresh if the stored access token expires within the next
+    // 5 minutes. This avoids a mid-request refresh that could add latency to
+    // the first API call after a long idle period.
+    const fiveMinutesFromNow = Date.now() + 5 * 60 * 1000;
+    if (tokenRecord.expiresAt.getTime() < fiveMinutesFromNow) {
+      console.log(`[Drive] Access token near expiry for user ${userId} — proactively refreshing...`);
+      try {
+        await oauth2Client.refreshAccessToken();
+        // The 'tokens' event listener above will persist the new token to DB.
+      } catch (err) {
+        console.warn(`[Drive] Proactive refresh failed for user ${userId}:`, err);
+      }
+    }
   }
 
   /**
