@@ -120,4 +120,51 @@ export class TransactionService {
       });
     });
   }
+
+  static async updateTransaction(id: string, messagingAccountId: string, data: any) {
+    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // 1. Find the existing transaction
+      const existing = await tx.transaction.findUnique({
+        where: { id, messagingAccountId }
+      });
+
+      if (!existing || existing.deletedAt) throw new Error('Not found');
+
+      // 2. Reverse the old balance effect
+      const oldAmount = Number(existing.amount);
+      const oldBalanceReversal = existing.type === 'INCOME' ? -oldAmount : oldAmount;
+
+      await tx.account.update({
+        where: { id: existing.accountId },
+        data: { currentBalance: { increment: oldBalanceReversal } }
+      });
+
+      // 3. If account changed, apply reversal was on old account, now apply new on new account
+      const newAccountId = data.accountId || existing.accountId;
+      const newType = data.type || existing.type;
+      const newAmount = data.amount !== undefined ? Number(data.amount) : oldAmount;
+      const newBalanceChange = newType === 'INCOME' ? newAmount : -newAmount;
+
+      await tx.account.update({
+        where: { id: newAccountId },
+        data: { currentBalance: { increment: newBalanceChange } }
+      });
+
+      // 4. Update the transaction record
+      const updated = await tx.transaction.update({
+        where: { id },
+        data: {
+          ...(data.accountId && { accountId: data.accountId }),
+          ...(data.categoryId !== undefined && { categoryId: data.categoryId || null }),
+          ...(data.type && { type: data.type }),
+          ...(data.amount !== undefined && { amount: data.amount }),
+          ...(data.description !== undefined && { description: data.description || null }),
+          ...(data.transactionDate && { transactionDate: new Date(data.transactionDate) }),
+        },
+        include: { category: true, account: true, items: true }
+      });
+
+      return updated;
+    });
+  }
 }

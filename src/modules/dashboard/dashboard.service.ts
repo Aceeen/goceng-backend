@@ -201,6 +201,11 @@ export class DashboardService {
       amount: Number(tx.amount),
       type: tx.type === 'INCOME' ? 'income' : tx.type === 'EXPENSE' ? 'expense' : 'transfer',
       icon: tx.category?.icon || null,
+      accountId: tx.accountId,
+      categoryId: tx.categoryId,
+      description: tx.description || '',
+      rawDate: tx.transactionDate.toISOString().split('T')[0],
+      rawType: tx.type,
     }));
 
     const gamification = this.calculateGamification(
