@@ -186,4 +186,30 @@ export class DriveService {
       return null;
     }
   }
+
+  /**
+   * Finds the GID by sheet name and returns the direct export URL.
+   */
+  static async getSheetExportUrlByName(userId: string, spreadsheetId: string, sheetName: string, format: string = 'pdf'): Promise<string | null> {
+    await this.authenticateUser(userId);
+    try {
+      const metadataStr = await sheetsAPI.spreadsheets.get({
+        spreadsheetId,
+        fields: 'sheets.properties(sheetId,title)'
+      });
+
+      const sheets = metadataStr.data.sheets;
+      if (!sheets) return null;
+
+      // Allow partial matches (e.g., "Januari" matches "Laporan Keuangan — Januari 2026")
+      const targetSheet = sheets.find(s => s.properties?.title?.toLowerCase().includes(sheetName.toLowerCase()));
+      if (!targetSheet || targetSheet.properties?.sheetId === undefined) return null;
+
+      const gid = targetSheet.properties!.sheetId!.toString();
+      return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=${format}&gid=${gid}&portrait=false&size=A4`;
+    } catch (error) {
+      console.error('Failed to get sheet export URL:', error);
+      return null;
+    }
+  }
 }
